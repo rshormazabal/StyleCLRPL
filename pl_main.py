@@ -45,7 +45,7 @@ def setup_neptune_logger(cfg: DictConfig, tags: list = None):
 @hydra.main(config_path="conf", config_name="StyleCLR_base_format")
 def main(cfg: DictConfig) -> None:
     """
-    Main training class. All parameters are
+    Main training class. All parameters are defined in the yaml Hydra configuration.
     :param cfg: Hydra format configuration. [omegaconf.dictconfig.DictConfig]
     :return: None.
     """
