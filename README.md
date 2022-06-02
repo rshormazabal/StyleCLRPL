@@ -36,7 +36,7 @@ Set configuration in `pl_main.py` with
 Can create a new configuration file folowing the base format available in `conf/`.
 For detailed information on how to modify configuration files through CLI, check [Hydra Documentation](https://hydra.cc/docs/tutorials/basic/your_first_app/config_file/).
 
-####Configuration file example.
+#### Configuration file example.
 ```yaml
 model_name: StyleCLR_base                                                  # Model name for loggin (neptune).
 root_path: /ROOT/                                                          # Project main root.
