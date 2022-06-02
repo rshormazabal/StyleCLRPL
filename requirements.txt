@@ -1,13 +1,10 @@
-# This file may be used to create an environment using:
-# $ conda create --name <env> --file <this file>
-# platform: linux-64
-
-torch~=1.10.2+cu113
-torchvision~=0.11.3+cu113
-omegaconf~=2.1.1
-numpy~=1.22.2
-PyYAML~=5.4.1
-tqdm~=4.62.3
-pandas~=1.4.1
-Pillow~=9.0.1
-hydra-core~=1.1.2
+hydra-core==1.2.0
+numpy==1.22.2
+omegaconf==2.1.1
+pandas==1.4.1
+Pillow==9.1.1
+pytorch_lightning==1.5.10
+PyYAML==6.0
+torch==1.10.2+cu113
+torchvision==0.11.3+cu113
+tqdm==4.62.3
