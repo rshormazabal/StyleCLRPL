@@ -40,7 +40,7 @@ For detailed information on how to modify configuration files through CLI, check
 ```yaml
 model_name: StyleCLR_base                                                  # Model name for loggin (neptune).
 root_path: /ROOT/                                                          # Project main root.
-seed: Seed                                                                 # Random seed in random, torch, pandas and cuda.
+seed: 9999                                                                 # Random seed in random, torch, pandas and cuda.
 gpu_ids:                                                                   # GPU ID's as list.
     - 1
     - 2
@@ -91,4 +91,9 @@ callbacks:
   monitor_mode: min                                                        # Example - Checkpointer, early stopping, etc.
   save_top_k: 5
   patience: 1000
+```
+
+As an example, after setting the `ROOT` variable in the config file above, can run the model on 4 GPUs and 4 workers with
+```shell
+python pl_main.py gpu_ids=[1,2,3,4] dataset.num_workers=4
 ```
