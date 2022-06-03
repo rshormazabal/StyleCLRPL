@@ -93,8 +93,11 @@ def main(cfg: DictConfig) -> None:
 
         # concatenate and dump
         dump_path = f'{cfg.dataset.style.data_path}{cfg.dataset.style.pickle_filename}'
-        precalculated_style_features = torch.cat(precalculated_style_features)
-        pickle.dump(precalculated_style_features.cpu(), open(dump_path, 'wb'))
+        precalculated_style_features = torch.cat(precalculated_style_features).detach().cpu()
+        pickle.dump(precalculated_style_features, open(dump_path, 'wb'))
+
+        # add style embeddings to train dataset
+        data.train_dataset.style_embeddings = precalculated_style_features
         print(f'Precalculated embeddings dumped at {dump_path}')
 
     # create trainer and fit
