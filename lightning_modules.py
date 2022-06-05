@@ -20,6 +20,7 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         """
         super().__init__()
         # config files
+        self.cfg = cfg
         self.dataset_cfg = cfg.dataset
         self.model_cfg = cfg.model
         self.optimizer_cfg = cfg.optimizer
@@ -44,7 +45,7 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         self.style_vgg = self.style_vgg.eval()
         self.style_decoder = self.style_decoder.eval()
 
-    def forward(self, images:  torch.Tensor, *args, **kwargs) -> torch.Tensor:
+    def forward(self, images: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         """
         Model forward pass.
         :param images: Batch of images (batch_dim, channels, weidth, height). [torch.Tensor]

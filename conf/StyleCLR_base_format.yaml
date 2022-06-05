@@ -47,7 +47,7 @@ logger:
       - example_only_adain_augmentations                                   # Tags for neptune logger as list.
   api_key: NEPTUNE_API_TOKEN                                               # Neptune API token.
 callbacks:
-  monitor: val_loss                                                        # Torch Lightning callback parameters
-  monitor_mode: min                                                        # Example - Checkpointer, early stopping, etc.
-  save_top_k: 5
-  patience: 1000
+  checkpoints:
+    dirpath: ROOT/model_checkpoints/
+    every_k_epochs: 5
+
