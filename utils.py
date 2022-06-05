@@ -51,7 +51,7 @@ class LastEpochCheckpoint(ModelCheckpoint):
             assert self.dirpath is not None
 
             # get current path
-            current = self.dirpath / f"config_file.ckpt"
+            current = self.dirpath / f"latest-epoch={pl_module.current_epoch}-config.yaml"
 
             # get preivous checkpoint filename to delete
             prev = (self.dirpath / f"latest-epoch={pl_module.current_epoch - self.every_k_epochs}.ckpt")
@@ -62,7 +62,7 @@ class LastEpochCheckpoint(ModelCheckpoint):
         # save YAML config on the first epoch
         # TODO: fails if we start from a configuration file with epoch different to zero.
         if pl_module.current_epoch == 0:
-            omegaconf.OmegaConf.save(pl_module.cfg, self.dirpath / f"latest-epoch={pl_module.current_epoch}-config.yaml")
+            omegaconf.OmegaConf.save(pl_module.cfg, self.dirpath / "config_file.ckpt")
 
 
 def setup_neptune_logger(cfg: DictConfig, tags: list = None):
