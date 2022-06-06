@@ -1,16 +1,18 @@
 from abc import ABC
+from inspect import classify_class_attrs
 
-from typing import List
+from typing import Tuple
 
 import pytorch_lightning as pl
 import torch
 from pytorch_lightning.utilities.types import STEP_OUTPUT, EPOCH_OUTPUT
 from torch.nn import functional as F, Sequential
 
+from dataset import ContentImageDataset
 from omegaconf import DictConfig
 from data_aug import adain
 from data_aug.adain import adaptive_instance_normalization
-from models.resnet_simclr import ResNetSimCLR
+from models.resnet_simclr import ResNetSimCLR, ResNetDownStream
 from utils import accuracy
 
 
@@ -90,8 +92,9 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         return {'logits': logits.detach(),
                 'labels': labels.detach(),
                 'loss': loss,
-                'acc_top1': top1[0].detach(),
-                'acc_top5': top5[0].detach()}
+                'nce_top1': top1[0].detach(),
+                'nce_top5': top5[0].detach()}
+
 
     def training_step_end(self, step_outputs: STEP_OUTPUT) -> STEP_OUTPUT:
         """
@@ -102,6 +105,7 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         """
         return step_outputs
 
+
     def training_epoch_end(self, outputs: EPOCH_OUTPUT):
         """
         Called at the end of the training epoch with the outputs of all training steps as a list.
@@ -109,14 +113,54 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         :param outputs: Concatenated list of batch outputs. [list[dicts]]
         :return:
         """
-        top1_epoch_avg = torch.stack([o['acc_top1'] for o in outputs]).mean()
-        top5_epoch_avg = torch.stack([o['acc_top5'] for o in outputs]).mean()
+        top1_epoch_avg = torch.stack([o['nce_top1'] for o in outputs]).mean()
+        top5_epoch_avg = torch.stack([o['nce_top5'] for o in outputs]).mean()
 
         # get mean across all batches
-        self.log("acc/top1", top1_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
-        self.log("acc/top5", top5_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log("nce_top1", top1_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log("nce_top5", top5_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
 
-    def info_nce_loss(self, features: torch.Tensor) -> List[torch.Tensor, torch.Tensor]:
+        if self.current_epoch % self.cfg.train.linear_predictor_every_n_epoch == 0:
+            result = self.run_linear_predictor()            
+            self.log_dict(result, on_epoch=True, prog_bar=True, sync_dist=True)
+
+    
+    def run_linear_predictor(self):
+
+        trainer = pl.Trainer(gpus=self.cfg.gpu_ids,
+                         strategy=self.cfg.train.strategy,
+                         precision=self.cfg.train.precision,
+                         log_every_n_steps=1,
+                         check_val_every_n_epoch=0,
+                         amp_backend=self.cfg.train.amp_backend,
+                         max_epochs=10,
+                        )
+
+        train_data, valid_data, _ = ContentImageDataset(self.cfg.dataset).get_dataset_train_val_test()
+
+        train_dataloader = torch.utils.data.DataLoader(train_data,
+                        batch_size=self.dataset_cfg.batch_size,
+                        shuffle=True,
+                        num_workers=self.dataset_cfg.num_workers,
+                        pin_memory=True,
+                        drop_last=True)
+
+        valid_dataloader = torch.utils.data.DataLoader(valid_data,
+                        batch_size=self.dataset_cfg.batch_size,
+                        shuffle=False,
+                        num_workers=self.dataset_cfg.num_workers,
+                        pin_memory=True,
+                        drop_last=True)
+
+        downstream_model = ClassificationModel(self.cfg)
+        downstream_model.model.get_params_from_resnetsimclr(self.model)
+        downstream_model.model.freeze_conv_params()
+        
+        trainer.fit(downstream_model, train_dataloader)
+        return trainer.validate(downstream_model, valid_dataloader)[0]
+
+
+    def info_nce_loss(self, features: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Noise-Contrastive Estimation loss, contrastive loss used for SSl.
         :param features: Augmented views features, vstacked (2 * batch_size, backbone_output_dim). [torch.Tensor]
@@ -148,6 +192,124 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
 
         logits = logits / self.model_cfg.temperature
         return logits, labels
+
+
+    def configure_optimizers(self):
+        """
+        Choose optimizers, schedulers and learning-rate schedulers to use. Automatically called by PL.
+        See PL documentation.
+        :return:
+        """
+        optimizer = torch.optim.Adam(self.model.parameters(),
+                                     self.optimizer_cfg.lr,
+                                     weight_decay=self.optimizer_cfg.weight_decay)
+
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
+                                                               T_max=self.dataset_cfg.len_train_loader,
+                                                               eta_min=0,
+                                                               last_epoch=-1)
+        return [optimizer], [{"scheduler": scheduler}]
+
+
+
+
+
+class ClassificationModel(pl.LightningModule, ABC):
+
+    def __init__(self, cfg: DictConfig):
+        """
+        Main Torch lightning module.
+        :param cfg: Hydra format CFG configuration object. [omegaconf.dictconfig.DictConfig]
+        """
+        super().__init__()
+        # config files
+        self.cfg = cfg
+        self.dataset_cfg = cfg.dataset
+        self.model_cfg = cfg.model
+        self.optimizer_cfg = cfg.optimizer
+        
+        # Downstream Classification Model
+        self.model = ResNetDownStream(model_cfg=self.model_cfg)
+
+
+    def forward(self, images: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+        """
+        Model forward pass.
+        :param images: Batch of images (batch_dim, channels, weidth, height). [torch.Tensor]
+        :param args: None.
+        :param kwargs: None.
+        :return:
+        """
+        return self.model(images)
+
+
+    def training_step(self, batch: list) -> STEP_OUTPUT:
+        """
+        Compute and return the training loss and some additional metrics for e.g. the progress bar or logger.
+        See PL documentation.
+        :param batch: Batch from self.train_dataloader. [list]
+        :return: Dictionary with per-batch loss and metrics. [dict]
+        """
+        # get content images and create two views
+        content_images, labels = batch
+
+        features = self.model(content_images)
+        loss = torch.nn.CrossEntropyLoss()(features, labels)
+
+        # get top 1 and top 5 accuracies
+        top1, top5 = accuracy(features, labels, topk=(1, 5))
+        return {'logits': features.detach(),
+                'labels': labels.detach(),
+                'loss': loss,
+                'trn_top1': top1[0].detach(),
+                'trn_top5': top5[0].detach()}
+
+
+
+
+    def training_epoch_end(self, outputs: EPOCH_OUTPUT):
+        """
+        Called at the end of the training epoch with the outputs of all training steps as a list.
+        See PL documentation
+        :param outputs: Concatenated list of batch outputs. [list[dicts]]
+        :return:
+        """
+        top1_epoch_avg = torch.stack([o['trn_top1'] for o in outputs]).mean()
+        top5_epoch_avg = torch.stack([o['trn_top5'] for o in outputs]).mean()
+
+        # get mean across all batches
+        self.log("trn_top1", top1_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log("trn_top5", top5_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
+
+
+    def validation_step(self, batch: list, batch_idx) -> STEP_OUTPUT:
+
+        content_images, labels = batch
+
+        features = self.model(content_images)
+
+        # get top 1 and top 5 accuracies
+        top1, top5 = accuracy(features, labels, topk=(1, 5))
+        return {
+            'acc_top1': top1, 
+            'acc_top5': top5
+        }
+
+
+    def validation_epoch_end(self, outputs: EPOCH_OUTPUT):
+        """
+        Called at the end of the training epoch with the outputs of all training steps as a list.
+        See PL documentation
+        :param outputs: Concatenated list of batch outputs. [list[dicts]]
+        :return:
+        """
+        top1_epoch_avg = torch.stack([o['acc_top1'] for o in outputs]).mean()
+        top5_epoch_avg = torch.stack([o['acc_top5'] for o in outputs]).mean()
+
+        # get mean across all batches
+        self.log("acc_top1", top1_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log("acc_top5", top5_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
+        
 
     def configure_optimizers(self):
         """

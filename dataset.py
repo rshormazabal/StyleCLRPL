@@ -25,17 +25,21 @@ class StyleCLRPLDataset(pl.LightningDataModule, ABC):
         """
         self.dataset_cfg = cfg
         self.train_dataset = None
-        self.content_dataset = None
+
+        self.train_content_dataset = None
+        self.val_content_dataset = None
+        self.test_content_dataset = None
+
         self.style_transform = None
         super().__init__()
 
     def setup(self, **kwargs):
         # get content dataset
-        dataset = StyleContrastiveDataset(self.dataset_cfg)
-        self.content_dataset = dataset.get_dataset()
+        a, b, c = ContentImageDataset(self.dataset_cfg).get_dataset_train_val_test()
+        self.train_content_dataset, self.val_content_dataset, self.test_content_dataset = a, b, c
 
         # get style dataset
-        self.train_dataset = StylizedDatasetOnGPU(content_dataset=self.content_dataset,
+        self.train_dataset = StylizedDatasetOnGPU(content_dataset=self.train_content_dataset,
                                                   style_data_path=self.dataset_cfg.style.data_path,
                                                   style_pickle_filename=self.dataset_cfg.style.pickle_filename)
 
@@ -49,7 +53,7 @@ class StyleCLRPLDataset(pl.LightningDataModule, ABC):
                                            drop_last=True)
 
 
-class StyleContrastiveDataset:
+class ContentImageDataset:
     def __init__(self, cfg: DictConfig) -> None:
         """
         Base dataset class. Only downloads data and applies only ToTensor transform.
@@ -63,19 +67,50 @@ class StyleContrastiveDataset:
         data_transforms = transforms.Compose([transforms.ToTensor()])
         return data_transforms
 
-    def get_dataset(self):
+
+    def calc_train_valid_split_lengths(self, dataset):
+        dataset_len = len(dataset)
+        valid_split = self.cfg.valid_split / (1 - self.cfg.test_split)
+        valid_len = int(dataset_len * valid_split)
+        train_len = dataset_len - valid_len
+        return (train_len, valid_len)
+
+    
+    def get_cifar10(self):
+
+        train_valid_dataset = datasets.CIFAR10(self.cfg.data_path, 
+                                                train=True, 
+                                                transform=self.get_no_transforms(), 
+                                                download=True)
+
+        train_valid_split_lengths = self.calc_train_valid_split_lengths(train_valid_dataset)
+        train_dataset, valid_dataset = torch.utils.data.random_split(train_valid_dataset, train_valid_split_lengths)
+
+        test_dataset = datasets.CIFAR10(self.cfg.data_path, 
+                                                train=False, 
+                                                transform=self.get_no_transforms(), 
+                                                download=True)
+        
+        return train_dataset, valid_dataset, test_dataset
+        
+
+    def get_stl10(self):
+        # TODO: To be Implemented
+
+        datasets.STL10(self.cfg.data_path, split='unlabeled',
+                                                          transform=self.get_no_transforms(),
+                                                          download=True)
+
+
+    def get_dataset_train_val_test(self):
         """
         Get datasets from torchvision. Downloads if files missing.
         :return:
         """
-        valid_datasets = {'cifar10': lambda: datasets.CIFAR10(self.cfg.data_path,
-                                                              train=True,
-                                                              transform=self.get_no_transforms(),
-                                                              download=True),
-
-                          'stl10': lambda: datasets.STL10(self.cfg.data_path, split='unlabeled',
-                                                          transform=self.get_no_transforms(),
-                                                          download=True)}
+        valid_datasets = {
+            'cifar10': self.get_cifar10,
+            # 'stl10': self.get_stl10      train/valid/test split not yet implemented
+        }
 
         try:
             dataset_fn = valid_datasets[self.cfg.dataset_name]

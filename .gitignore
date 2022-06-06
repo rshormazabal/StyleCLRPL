@@ -3,6 +3,7 @@ datasets/
 outputs/
 nohup.out
 data/style_precalculated_features.pkl
+model_checkpoints/
 
 # Visual Studio Code
 .vscode

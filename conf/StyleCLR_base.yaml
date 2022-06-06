@@ -6,11 +6,13 @@ gpu_ids:                                                                # GPU ID
 train:                                                                     # PL trainer params. See PL trainer documentation.
   strategy: ddp
   precision: 32
-  max_epochs: 100
+  max_epochs: 11
   log_every_n_steps: 4
   check_val_every_n_epoch: 0
   amp_backend: native
   enable_checkpointing: True
+  linear_predictor_every_n_epoch: 2
+
 model:
   base_model: resnet50                                                     # Backbone model for SimCLR.
   out_dim: 128                                                             # SimCLR output dimension.
@@ -26,11 +28,13 @@ dataset:
     metadata_filename: train_info_1000.csv                                 # Style dataset metadata CSV filename.
     pickle_filename: style_precalculated_features.pkl                      # Precalculated style images embeddings generated with frozen backbone VGG.
     image_size: 96                                                         # Style image warp size (square).
-    device: 0                                                              # Device to calculate preprocessed style embeddings.
+    device: 6                                                              # Device to calculate preprocessed style embeddings.
   dataset_name: cifar10                                                      # Dataset to use (stl10/cifar10)
   batch_size: 128                                                     # Main batch size.
   num_workers: 4                                                           # Main dataloader number of workers.
-  n_views: 2                                                               # Number of views to generate (currently supports 2)
+  n_views: 2
+  valid_split: 0.2                                                      # Ratio of dataset used as validation
+  test_split: 0.2                                                       # Ratio of dataset used as validation                                                               # Number of views to generate (currently supports 2)
   data_path: /home/felix/StyleCLRPL/datasets                                                # Content images path.
   len_train_loader: set_at_runtime                                         # Holder for train dataloader size (used in scheduler).
 optimizer:
@@ -45,6 +49,6 @@ logger:
   api_key: NEPTUNE_API_TOKEN                                               # Neptune API token.
 callbacks:
   checkpoints:
-    dirpath: ROOT/model_checkpoints/
+    dirpath: /home/felix/StyleCLRPL/model_checkpoints/
     every_k_epochs: 5
 
