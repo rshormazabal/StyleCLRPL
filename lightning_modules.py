@@ -92,8 +92,8 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         return {'logits': logits.detach(),
                 'labels': labels.detach(),
                 'loss': loss,
-                'nce_top1': top1[0].detach(),
-                'nce_top5': top5[0].detach()}
+                'nce/top1': top1[0].detach(),
+                'nce/top5': top5[0].detach()}
 
 
     def training_step_end(self, step_outputs: STEP_OUTPUT) -> STEP_OUTPUT:
@@ -113,12 +113,12 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         :param outputs: Concatenated list of batch outputs. [list[dicts]]
         :return:
         """
-        top1_epoch_avg = torch.stack([o['nce_top1'] for o in outputs]).mean()
-        top5_epoch_avg = torch.stack([o['nce_top5'] for o in outputs]).mean()
+        top1_epoch_avg = torch.stack([o['nce/top1'] for o in outputs]).mean()
+        top5_epoch_avg = torch.stack([o['nce/top5'] for o in outputs]).mean()
 
         # get mean across all batches
-        self.log("nce_top1", top1_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
-        self.log("nce_top5", top5_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log("nce/top1", top1_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log("nce/top5", top5_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
 
         if self.current_epoch % self.cfg.train.linear_predictor_every_n_epoch == 0:
             result = self.run_linear_predictor()            
@@ -261,8 +261,8 @@ class ClassificationModel(pl.LightningModule, ABC):
         return {'logits': features.detach(),
                 'labels': labels.detach(),
                 'loss': loss,
-                'trn_top1': top1[0].detach(),
-                'trn_top5': top5[0].detach()}
+                'trn/top1': top1[0].detach(),
+                'trn/top5': top5[0].detach()}
 
 
 
@@ -274,12 +274,12 @@ class ClassificationModel(pl.LightningModule, ABC):
         :param outputs: Concatenated list of batch outputs. [list[dicts]]
         :return:
         """
-        top1_epoch_avg = torch.stack([o['trn_top1'] for o in outputs]).mean()
-        top5_epoch_avg = torch.stack([o['trn_top5'] for o in outputs]).mean()
+        top1_epoch_avg = torch.stack([o['trn/top1'] for o in outputs]).mean()
+        top5_epoch_avg = torch.stack([o['trn/top5'] for o in outputs]).mean()
 
         # get mean across all batches
-        self.log("trn_top1", top1_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
-        self.log("trn_top5", top5_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log("trn/top1", top1_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log("trn/top5", top5_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
 
 
     def validation_step(self, batch: list, batch_idx) -> STEP_OUTPUT:
@@ -291,8 +291,8 @@ class ClassificationModel(pl.LightningModule, ABC):
         # get top 1 and top 5 accuracies
         top1, top5 = accuracy(features, labels, topk=(1, 5))
         return {
-            'acc_top1': top1, 
-            'acc_top5': top5
+            'acc/top1': top1, 
+            'acc/top5': top5
         }
 
 
@@ -303,12 +303,12 @@ class ClassificationModel(pl.LightningModule, ABC):
         :param outputs: Concatenated list of batch outputs. [list[dicts]]
         :return:
         """
-        top1_epoch_avg = torch.stack([o['acc_top1'] for o in outputs]).mean()
-        top5_epoch_avg = torch.stack([o['acc_top5'] for o in outputs]).mean()
+        top1_epoch_avg = torch.stack([o['acc/top1'] for o in outputs]).mean()
+        top5_epoch_avg = torch.stack([o['acc/top5'] for o in outputs]).mean()
 
         # get mean across all batches
-        self.log("acc_top1", top1_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
-        self.log("acc_top5", top5_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log("acc/top1", top1_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log("acc/top5", top5_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
         
 
     def configure_optimizers(self):

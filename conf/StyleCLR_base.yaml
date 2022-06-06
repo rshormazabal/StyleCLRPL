@@ -11,7 +11,7 @@ train:                                                                     # PL 
   check_val_every_n_epoch: 0
   amp_backend: native
   enable_checkpointing: True
-  linear_predictor_every_n_epoch: 2
+  linear_predictor_every_n_epoch: 1
 
 model:
   base_model: resnet50                                                     # Backbone model for SimCLR.

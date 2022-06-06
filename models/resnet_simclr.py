@@ -69,7 +69,7 @@ class ResNetDownStream(nn.Module):
         # so the names do not overlap 
         pretrained_state = { k:v for k,v in model_state_dict.items() if k in self_state_dict }
 
-        self_state_dict.update(pretrained_state)
+        self.load_state_dict(model.state_dict(), strict=False)
 
 
     def freeze_conv_params(self):
