@@ -1,5 +1,7 @@
 from abc import ABC
 
+from typing import List
+
 import pytorch_lightning as pl
 import torch
 from pytorch_lightning.utilities.types import STEP_OUTPUT, EPOCH_OUTPUT
@@ -20,6 +22,7 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         """
         super().__init__()
         # config files
+        self.cfg = cfg
         self.dataset_cfg = cfg.dataset
         self.model_cfg = cfg.model
         self.optimizer_cfg = cfg.optimizer
@@ -44,7 +47,7 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         self.style_vgg = self.style_vgg.eval()
         self.style_decoder = self.style_decoder.eval()
 
-    def forward(self, images:  torch.Tensor, *args, **kwargs) -> torch.Tensor:
+    def forward(self, images: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         """
         Model forward pass.
         :param images: Batch of images (batch_dim, channels, weidth, height). [torch.Tensor]
@@ -113,7 +116,7 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         self.log("acc/top1", top1_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
         self.log("acc/top5", top5_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
 
-    def info_nce_loss(self, features: torch.Tensor) -> [torch.Tensor, torch.Tensor]:
+    def info_nce_loss(self, features: torch.Tensor) -> List[torch.Tensor, torch.Tensor]:
         """
         Noise-Contrastive Estimation loss, contrastive loss used for SSl.
         :param features: Augmented views features, vstacked (2 * batch_size, backbone_output_dim). [torch.Tensor]

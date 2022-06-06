@@ -2,12 +2,10 @@ import os
 import pickle
 
 import hydra
-import omegaconf
 import pytorch_lightning as pl
 import torch
 from omegaconf import DictConfig
-from pytorch_lightning.callbacks import ModelSummary, LearningRateMonitor
-from pytorch_lightning.loggers import NeptuneLogger
+from pytorch_lightning.callbacks import ModelSummary, LearningRateMonitor, ModelCheckpoint
 from torch.utils.data import DataLoader
 from torchvision.transforms import transforms
 from tqdm import tqdm
@@ -15,43 +13,16 @@ from tqdm import tqdm
 from dataset import PrecalculateSyleEmbeddings
 from dataset import StyleCLRPLDataset
 from lightning_modules import StyleCLRPLModel
+from utils import LastEpochCheckpoint
 
 
-def setup_neptune_logger(cfg: DictConfig, tags: list = None):
-    """
-    Nettune AI loger configuration. Needs API key.
-    :param cfg: Configuration dictionary. [omegaconf.dictconfig.DictConfig]
-    :param tags: List of tags to log a particular run. [list]
-    :return:
-    """
-    meta_tags = [cfg.model_name]
-
-    if tags is not None:
-        meta_tags.extend(tags)
-
-    # setup logger
-    neptune_logger = NeptuneLogger(api_key=cfg.logger.api_key,
-                                   project=cfg.logger.project_name,
-                                   tags=meta_tags)
-
-    neptune_logger.experiment["parameters/model"] = cfg.model
-    neptune_logger.experiment["parameters/data"] = cfg.data
-    neptune_logger.experiment["parameters/optimizer"] = cfg.optimizer
-    neptune_logger.experiment["parameters/run"] = {k: v for k, v in cfg.items() if not isinstance(v, omegaconf.dictconfig.DictConfig)}
-
-    return neptune_logger
-
-
-@hydra.main(config_path="conf", config_name="StyleCLR_base_format")
+@hydra.main(config_path="conf", config_name="StyleCLR_base")
 def main(cfg: DictConfig) -> None:
     """
     Main training class. All parameters are defined in the yaml Hydra configuration.
     :param cfg: Hydra format configuration. [omegaconf.dictconfig.DictConfig]
     :return: None.
     """
-    # setup logger
-    # logger = setup_neptune_logger(cfg)
-
     # set seeds
     pl.seed_everything(cfg.seed)
 
@@ -62,6 +33,12 @@ def main(cfg: DictConfig) -> None:
     # set dataloader len for schduler
     cfg.dataset['len_train_loader'] = len(data.train_dataloader())
 
+    # checkpoint callback, saves last model every k epochs. Better than implementing directly in the PL logic since
+    # it can have problems on DDP if main process not set corectly.
+    checkpoint_callback = LastEpochCheckpoint(dirpath=cfg.callbacks.checkpoints.dirpath,
+                                              dataset_name=cfg.dataset.dataset_name,
+                                              base_model_name=cfg.model.base_model,
+                                              every_k_epochs=cfg.callbacks.checkpoints.every_k_epochs)
     # profiler
     profiler = None
 
@@ -93,8 +70,11 @@ def main(cfg: DictConfig) -> None:
 
         # concatenate and dump
         dump_path = f'{cfg.dataset.style.data_path}{cfg.dataset.style.pickle_filename}'
-        precalculated_style_features = torch.cat(precalculated_style_features)
-        pickle.dump(precalculated_style_features.cpu(), open(dump_path, 'wb'))
+        precalculated_style_features = torch.cat(precalculated_style_features).detach().cpu()
+        pickle.dump(precalculated_style_features, open(dump_path, 'wb'))
+
+        # add style embeddings to train dataset
+        data.train_dataset.style_embeddings = precalculated_style_features
         print(f'Precalculated embeddings dumped at {dump_path}')
 
     # create trainer and fit
@@ -107,7 +87,8 @@ def main(cfg: DictConfig) -> None:
                          max_epochs=cfg.train.max_epochs,
                          enable_checkpointing=cfg.train.enable_checkpointing,
                          callbacks=[ModelSummary(max_depth=1),
-                                    LearningRateMonitor()],
+                                    LearningRateMonitor(),
+                                    checkpoint_callback],
                          profiler=profiler)
     trainer.fit(model, data)
 
