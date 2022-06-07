@@ -10,6 +10,7 @@ from data_aug import adain
 from data_aug.adain import adaptive_instance_normalization
 from models.resnet_simclr import ResNetSimCLR
 from utils import accuracy
+import nvidia.dali.fn as fn
 
 
 class StyleCLRPLModel(pl.LightningModule, ABC):
@@ -78,6 +79,11 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
 
             styled_images = self.style_decoder(styled_images)
 
+        #data augmentation on GPU
+        #random resized crop, horizontalflip, color_jitter(p=0.8, 0.8,0.8,0.8,0.2), grayscale(p=0.2), gaussianblur(k=int(0.1*size))
+        
+
+        
         # augmented views contrastive setup
         features = self.model(styled_images)
         logits, labels = self.info_nce_loss(features)
