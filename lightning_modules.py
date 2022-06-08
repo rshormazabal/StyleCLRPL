@@ -87,10 +87,10 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         #data augmentation on GPU
         #random resized crop, horizontalflip, color_jitter(p=0.8, 0.8,0.8,0.8,0.2), grayscale(p=0.2), gaussianblur(k=int(0.1*size))
         if self.dataset_cfg.augmentation.crop or self.dataset_cfg.augmentation.color or self.dataset_cfg.augmentation.blur:
-            styled_augmented_images = self.data_augmentation(styled_images)
+            styled_images = self.data_augmentation(styled_images)
         
         # augmented views contrastive setup
-        features = self.model(styled_augmented_images)
+        features = self.model(styled_images)
         logits, labels = self.info_nce_loss(features)
         loss = torch.nn.CrossEntropyLoss()(logits, labels)
 
