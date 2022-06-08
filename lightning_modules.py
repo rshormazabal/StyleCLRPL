@@ -49,6 +49,36 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         self.style_vgg = self.style_vgg.eval()
         self.style_decoder = self.style_decoder.eval()
 
+        ##
+        # linear predictor
+        ##
+
+        self.linear_trainer = pl.Trainer(gpus=self.cfg.gpu_ids,
+            strategy=self.cfg.train.strategy,
+            precision=self.cfg.train.precision,
+            log_every_n_steps=1,
+            check_val_every_n_epoch=0,
+            amp_backend=self.cfg.train.amp_backend,
+            max_epochs=self.cfg.probe.epochs,
+        )
+
+        train_data, valid_data, _ = ContentImageDataset(self.cfg).get_dataset_for_linear_probe()
+
+        self.probe_train_dataloader = torch.utils.data.DataLoader(train_data,
+                        batch_size=self.dataset_cfg.batch_size,
+                        shuffle=True,
+                        num_workers=self.dataset_cfg.num_workers,
+                        pin_memory=True,
+                        drop_last=True)
+
+        self.probe_valid_dataloader = torch.utils.data.DataLoader(valid_data,
+                        batch_size=self.dataset_cfg.batch_size,
+                        shuffle=False,
+                        num_workers=self.dataset_cfg.num_workers,
+                        pin_memory=True,
+                        drop_last=True)
+
+
     def forward(self, images: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         """
         Model forward pass.
@@ -120,44 +150,19 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         self.log("nce/top1", top1_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
         self.log("nce/top5", top5_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
 
-        if self.current_epoch % self.cfg.train.linear_predictor_every_n_epoch == 0:
+        if self.current_epoch % self.cfg.probe.run_every_n_epoch == 0:
             result = self.run_linear_predictor()            
             self.log_dict(result, on_epoch=True, prog_bar=True, sync_dist=True)
 
     
     def run_linear_predictor(self):
 
-        trainer = pl.Trainer(gpus=self.cfg.gpu_ids,
-                         strategy=self.cfg.train.strategy,
-                         precision=self.cfg.train.precision,
-                         log_every_n_steps=1,
-                         check_val_every_n_epoch=0,
-                         amp_backend=self.cfg.train.amp_backend,
-                         max_epochs=10,
-                        )
-
-        train_data, valid_data, _ = ContentImageDataset(self.cfg.dataset).get_dataset_train_val_test()
-
-        train_dataloader = torch.utils.data.DataLoader(train_data,
-                        batch_size=self.dataset_cfg.batch_size,
-                        shuffle=True,
-                        num_workers=self.dataset_cfg.num_workers,
-                        pin_memory=True,
-                        drop_last=True)
-
-        valid_dataloader = torch.utils.data.DataLoader(valid_data,
-                        batch_size=self.dataset_cfg.batch_size,
-                        shuffle=False,
-                        num_workers=self.dataset_cfg.num_workers,
-                        pin_memory=True,
-                        drop_last=True)
-
         downstream_model = ClassificationModel(self.cfg)
         downstream_model.model.get_params_from_resnetsimclr(self.model)
         downstream_model.model.freeze_conv_params()
         
-        trainer.fit(downstream_model, train_dataloader)
-        return trainer.validate(downstream_model, valid_dataloader)[0]
+        self.linear_trainer.fit(downstream_model, self.probe_train_dataloader)
+        return self.linear_trainer.validate(downstream_model, self.probe_valid_dataloader)[0]
 
 
     def info_nce_loss(self, features: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
