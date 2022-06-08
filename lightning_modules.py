@@ -120,13 +120,13 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         pipe = Pipeline(batch_size=self.dataset_cfg.batch_size*2, num_threads=1, device_id=0)
         with pipe:
             styled_image = fn.external_source(source=eii, device='gpu', batch=True, cuda_stream=0, dtype=types.UINT8)
-            styled_image = fn.random_resized_crop(styled_image, size=96) if self.dataset_cfg.augmentation.crop else styled_image
+            styled_image = fn.random_resized_crop(styled_image, size=self.dataset_cfg.augmentation.size) if self.dataset_cfg.augmentation.crop else styled_image
             styled_image = fn.flip(styled_image, horizontal=1, vertical=0) if torch.rand(1)<0.5 and self.dataset_cfg.augmentation.crop else styled_image
             b,c,s = torch.distributions.uniform.Uniform(1-0.8, 1+0.8).sample([3,])
             h = torch.distributions.uniform.Uniform(-0.2, 0.2).sample([1,])
             styled_image = fn.color_twist(styled_image, brightness=b, contrast=c, saturation=s, hue=h) if torch.rand(1)<0.8 and self.dataset_cfg.augmentation.color else styled_image #only accept hwc
             styled_image = fn.color_space_conversion(styled_image, image_type=types.RGB, output_type=types.GRAY) if torch.rand(1)<0.2 and self.dataset_cfg.augmentation.color else styled_image #only accept hwc, uint8
-            styled_image = fn.gaussian_blur(styled_image, window_size=int(0.1*96)) if self.dataset_cfg.augmentation.blur else styled_image
+            styled_image = fn.gaussian_blur(styled_image, window_size=int(0.1*self.dataset_cfg.augmentation.size)) if self.dataset_cfg.augmentation.blur else styled_image
             pipe.set_outputs(styled_image)
         pipe.build()
         styled_image=pipe.run()
