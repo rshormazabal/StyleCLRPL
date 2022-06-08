@@ -1,0 +1,7 @@
+/__pycache__
+/*/__pycache__
+/outputs
+*.jpg
+/datasets
+/model_checkpoints
+/data/*.pkl

@@ -75,7 +75,8 @@ class StyleContrastiveDataset:
 
                           'stl10': lambda: datasets.STL10(self.cfg.data_path, split='unlabeled',
                                                           transform=self.get_no_transforms(),
-                                                          download=True)}
+                                                          download=True),
+                          'imagenet': lambda: None}
 
         try:
             dataset_fn = valid_datasets[self.cfg.dataset_name]
@@ -124,7 +125,7 @@ class StylizedDatasetOnGPU:
 
         # get content image
         content_image = self.content_dataset[idx][0]
-        content = self.content_tf(self.toPIL(content_image))
+        content = self.content_tf(self.toPIL(content_image)) #totensor
 
         return [content,
                 self.style_embeddings[sampled_styles[0]],

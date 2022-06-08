@@ -30,6 +30,11 @@ dataset:
     pickle_filename: style_precalculated_features.pkl                      # Precalculated style images embeddings generated with frozen backbone VGG.
     image_size: 96                                                         # Style image warp size (square).
     device: 0                                                              # Device to calculate preprocessed style embeddings.
+  augmentation:
+    size: 96                                                               # random crop and resize to this size
+    crop: True                                                             # Whether to add random crop, resize and flip in data augmentation 
+    color: True                                                            # Whether to add color distortion and color drop in data augmentation
+    blur: True                                                             # Whether to add gaussain blur in data augmentation
   dataset_name: stl10                                                      # Dataset to use (stl10/cifar10)
   batch_size: 512                                                          # Main batch size.
   num_workers: 4                                                           # Main dataloader number of workers.
@@ -48,6 +53,6 @@ logger:
   api_key: NEPTUNE_API_TOKEN                                               # Neptune API token.
 callbacks:
   checkpoints:
-    dirpath: ROOT/model_checkpoints/
+    dirpath: /ROOT/model_checkpoints/
     every_k_epochs: 5
 
