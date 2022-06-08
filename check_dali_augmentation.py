@@ -2,6 +2,7 @@
 
 import nvidia.dali.fn as fn
 import nvidia.dali as dali
+from nvidia.dali.plugin.pytorch import feed_ndarray
 from nvidia.dali.pipeline import Pipeline
 import nvidia.dali.types as types
 from torchvision.transforms import transforms
@@ -13,7 +14,7 @@ from PIL import Image
 
 class ExternalInputGPUIterator(object):
     def __init__(self, images):
-        self.images = images
+        self.images = 255*images.permute(0,2,3,1).contiguous() 
 
     def __iter__(self):
         self.i=0
@@ -21,20 +22,8 @@ class ExternalInputGPUIterator(object):
         return self
 
     def __next__(self):
-        return [self.images[i,:,:,:] for i in range(self.n)]
+        return [self.images[i,:,:,:].type(torch.uint8) for i in range(self.n)]
 
-
-
-# @dali.pipeline_def
-# def my_pipe(styled_image):
-#     styled_image = fn.random_resized_crop(styled_image, size=96, device='gpu')
-#     styled_image = fn.flip(styled_image, horizontal=1, vertical=0, device='gpu') if torch.rand(1)<0.5 else styled_image
-#     b,c,s = torch.distributions.uniform.Uniform(1-0.8, 1+0.8).sample([3,])
-#     h = torch.distributions.uniform.Uniform(-0.2, 0.2).sample([1,])
-#     styled_image = fn.color_twist(styled_image, brightness=b, contrast=c, saturation=s, hue=h) if torch.rand(1)<0.8 else styled_image
-#     styled_image = fn.color_space_conversion(styled_image, image_type='RGB', output_type='GRAY', device='gpu') if torch.rand(1)<0.2 else styled_image
-#     styled_image = fn.gaussian_blur(styled_image, window_size=int(0.1*96), device='gpu')
-#     return styled_image
 
 
 img_list = glob.glob('../../data/imagenet/n01440764/*.JPEG')
@@ -47,25 +36,38 @@ for i in range(25):
     tensors.append(transform(img).unsqueeze(dim=0))
 styled_image = torch.cat(tensors, dim=0)
 save_image(make_grid(styled_image, nrow=5), 'before.jpg')
-print(styled_image.shape)
-styled_image = styled_image.permute(0,2,3,1) #bchw-->bhwc
+print('max: {}, min: {}'.format(torch.max(styled_image), torch.min(styled_image)))
 print(styled_image.shape)
 
 eii = ExternalInputGPUIterator(styled_image.to('cuda'))
 pipe = Pipeline(batch_size=25, num_threads=1, device_id=0)
 with pipe:
-    styled_image = fn.external_source(source=eii, device='gpu', batch=True)
-    # styled_image = fn.decoders.image(styled_image, device='gpu')
+    styled_image = fn.external_source(source=eii, device='gpu', batch=True, cuda_stream=0, dtype=types.UINT8)
     styled_image = fn.random_resized_crop(styled_image, size=96)
     styled_image = fn.flip(styled_image, horizontal=1, vertical=0) if torch.rand(1)<0.5 else styled_image
     b,c,s = torch.distributions.uniform.Uniform(1-0.8, 1+0.8).sample([3,])
     h = torch.distributions.uniform.Uniform(-0.2, 0.2).sample([1,])
-    styled_image = fn.color_twist(styled_image, brightness=b, contrast=c, saturation=s, hue=h) if torch.rand(1)<0.8 else styled_image #hwc
-    styled_image = fn.color_space_conversion(styled_image, image_type=types.RGB, output_type=types.GRAY) if torch.rand(1)<0.2 else styled_image #hwc
+    styled_image = fn.color_twist(styled_image, brightness=b, contrast=c, saturation=s, hue=h) if torch.rand(1)<0.8 else styled_image #only accept hwc
+    styled_image = fn.color_space_conversion(styled_image, image_type=types.RGB, output_type=types.GRAY) if torch.rand(1)<0.2 else styled_image #only accept hwc, uint8
     styled_image = fn.gaussian_blur(styled_image, window_size=int(0.1*96))
     pipe.set_outputs(styled_image)
 
 pipe.build()
 styled_image=pipe.run()
 
-save_image(make_grid(styled_image,nrow=5), 'after.jpg')
+# print(styled_image) # shpe:(1,) type:TensorListGPU
+styled_image = styled_image[0].as_tensor() # type:TensorGPU
+# print(styled_image)
+styled_torch = torch.zeros(styled_image.shape(), dtype=torch.uint8).cuda()
+feed_ndarray(styled_image, styled_torch)
+styled_torch = styled_torch.permute(0,3,1,2).type(torch.float32)/225.
+c=styled_torch.shape[1]
+if c==1:
+    styled_torch = styled_torch.repeat(1,3,1,1)
+
+#gpu->cpu->gpu
+# styled_torch = torch.cat([torch.Tensor(styled_image[0].as_cpu().at(i)).permute(2,0,1).unsqueeze(dim=0) for i in range(25)], dim=0)
+# styled_torch = styled_torch.type(torch.float32)/225.
+
+print(styled_torch.shape)
+save_image(make_grid(styled_torch,nrow=5), 'after.jpg')

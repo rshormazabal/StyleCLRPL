@@ -10,7 +10,11 @@ from data_aug import adain
 from data_aug.adain import adaptive_instance_normalization
 from models.resnet_simclr import ResNetSimCLR
 from utils import accuracy
+
 import nvidia.dali.fn as fn
+from nvidia.dali.plugin.pytorch import feed_ndarray
+from nvidia.dali.pipeline import Pipeline
+import nvidia.dali.types as types
 
 
 class StyleCLRPLModel(pl.LightningModule, ABC):
@@ -45,6 +49,7 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         # set to eval
         self.style_vgg = self.style_vgg.eval()
         self.style_decoder = self.style_decoder.eval()
+
 
     def forward(self, images: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         """
@@ -81,11 +86,11 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
 
         #data augmentation on GPU
         #random resized crop, horizontalflip, color_jitter(p=0.8, 0.8,0.8,0.8,0.2), grayscale(p=0.2), gaussianblur(k=int(0.1*size))
-        
-
+        if self.dataset_cfg.augmentation.crop or self.dataset_cfg.augmentation.color or self.dataset_cfg.augmentation.blur:
+            styled_augmented_images = self.data_augmentation(styled_images)
         
         # augmented views contrastive setup
-        features = self.model(styled_images)
+        features = self.model(styled_augmented_images)
         logits, labels = self.info_nce_loss(features)
         loss = torch.nn.CrossEntropyLoss()(logits, labels)
 
@@ -96,6 +101,47 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
                 'loss': loss,
                 'acc_top1': top1[0].detach(),
                 'acc_top5': top5[0].detach()}
+        
+
+    def data_augmentation(self, styled_images):
+        class ExternalInputGPUIterator(object):
+            def __init__(self, images):
+                self.images = 255*images.permute(0,2,3,1).contiguous() 
+
+            def __iter__(self):
+                self.i=0
+                self.n=self.images.shape[0]
+                return self
+
+            def __next__(self):
+                return [self.images[i,:,:,:].type(torch.uint8) for i in range(self.n)]
+
+        eii = ExternalInputGPUIterator(styled_images)
+        pipe = Pipeline(batch_size=self.dataset_cfg.batch_size, num_threads=1, device_id=0)
+        with pipe:
+            styled_image = fn.external_source(source=eii, device='gpu', batch=True, cuda_stream=0, dtype=types.UINT8)
+            styled_image = fn.random_resized_crop(styled_image, size=96) if self.dataset_cfg.augmentation.crop else styled_image
+            styled_image = fn.flip(styled_image, horizontal=1, vertical=0) if torch.rand(1)<0.5 and self.dataset_cfg.augmentation.crop else styled_image
+            b,c,s = torch.distributions.uniform.Uniform(1-0.8, 1+0.8).sample([3,])
+            h = torch.distributions.uniform.Uniform(-0.2, 0.2).sample([1,])
+            styled_image = fn.color_twist(styled_image, brightness=b, contrast=c, saturation=s, hue=h) if torch.rand(1)<0.8 and self.dataset_cfg.augmentation.color else styled_image #only accept hwc
+            styled_image = fn.color_space_conversion(styled_image, image_type=types.RGB, output_type=types.GRAY) if torch.rand(1)<0.2 and self.dataset_cfg.augmentation.color else styled_image #only accept hwc, uint8
+            styled_image = fn.gaussian_blur(styled_image, window_size=int(0.1*96)) if self.dataset_cfg.augmentation.blur else styled_image
+            pipe.set_outputs(styled_image)
+        pipe.build()
+        styled_image=pipe.run()
+        # print(styled_image) # shpe:(1,) type:TensorListGPU
+        styled_image = styled_image[0].as_tensor() # type:TensorGPU
+        # print(styled_image)
+        styled_augmented_images = torch.zeros(styled_image.shape(), dtype=torch.uint8).cuda()
+        feed_ndarray(styled_image, styled_augmented_images)
+        styled_augmented_images = styled_augmented_images.permute(0,3,1,2).type(styled_images.dtype)/225.
+        c=styled_augmented_images.shape[1]
+        if c==1:
+            styled_augmented_images = styled_augmented_images.repeat(1,3,1,1)
+
+        return styled_augmented_images
+
 
     def training_step_end(self, step_outputs: STEP_OUTPUT) -> STEP_OUTPUT:
         """

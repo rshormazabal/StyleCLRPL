@@ -1,5 +1,5 @@
 model_name: StyleCLR_base                                                  # Model name for loggin (neptune).
-root_path: /ROOT/                                                          # Project main root.
+root_path: ./                                                          # Project main root.
 seed: Seed                                                                 # Random seed in random, torch, pandas and cuda.
 gpu_ids:                                                                   # GPU ID's as list.
     - 1
@@ -19,22 +19,26 @@ model:
   out_dim: 128                                                             # SimCLR output dimension.
   temperature: 0.07                                                        # InfoNCE temperature parameters.
   style_alpha: 0.8                                                         # AdaIn alpha (higher -> stronger style).
-  style_vgg_path: /ROOT/data/pretrained_models_adain/vgg_normalised.pth    # Style transfer VGG backbone network pretrained weights' path.
-  style_decoder_path: /ROOT/data/pretrained_models_adain/decoder.pth       # Style transfer decoder network pretrained weights' path.
+  style_vgg_path: ./data/pretrained_models_adain/vgg_normalised.pth    # Style transfer VGG backbone network pretrained weights' path.
+  style_decoder_path: ./data/pretrained_models_adain/decoder.pth       # Style transfer decoder network pretrained weights' path.
 dataset:
   style:
     recalculate_vgg_embeddings: False                                      # Whether to calculate pretrained embeddings for style images.
-    data_path: /ROOT/data/                                                 # Style data path (metadata and images).
+    data_path: ./data/                                                 # Style data path (metadata and images).
     image_path: style_augmentation_images/                                 # Style images folder name.
     metadata_filename: train_info_1000.csv                                 # Style dataset metadata CSV filename.
     pickle_filename: style_precalculated_features.pkl                      # Precalculated style images embeddings generated with frozen backbone VGG.
     image_size: 96                                                         # Style image warp size (square).
     device: 0                                                              # Device to calculate preprocessed style embeddings.
+  augmentation:
+    crop: True                                                             # Whether to add random crop, resize and flip in data augmentation 
+    color: True                                                            # Whether to add color distortion and color drop in data augmentation
+    blur: True                                                             # Whether to add gaussain blur in data augmentation
   dataset_name: stl10                                                      # Dataset to use (stl10/cifar10)
   batch_size: 512                                                          # Main batch size.
   num_workers: 4                                                           # Main dataloader number of workers.
   n_views: 2                                                               # Number of views to generate (currently supports 2)
-  data_path: /ROOT/datasets                                                # Content images path.
+  data_path: ./datasets                                                # Content images path.
   len_train_loader: set_at_runtime                                         # Holder for train dataloader size (used in scheduler).
 optimizer:
   lr: 0.0003                                                               # Main Learning rate.
