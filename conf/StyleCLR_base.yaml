@@ -12,12 +12,12 @@ train:                                                                     # PL 
   amp_backend: native
   enable_checkpointing: True
 probe:
-  run_every_n_epoch: 5
+  run_every_n_epoch: 1
   epochs: 10
 
 model:
   base_model: resnet50                                                     # Backbone model for SimCLR.
-  out_dim: 1000                                                           # SimCLR output dimension.
+  out_dim: 128                                                             # SimCLR output dimension.
   temperature: 0.07                                                        # InfoNCE temperature parameters.
   style_alpha: 0.8                                                         # AdaIn alpha (higher -> stronger style).
   style_vgg_path: /home/felix/StyleCLRPL/data/pretrained_models_adain/vgg_normalised.pth    # Style transfer VGG backbone network pretrained weights' path.
