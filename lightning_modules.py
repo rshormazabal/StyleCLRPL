@@ -117,7 +117,7 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
                 return [self.images[i,:,:,:].type(torch.uint8) for i in range(self.n)]
 
         eii = ExternalInputGPUIterator(styled_images)
-        pipe = Pipeline(batch_size=self.dataset_cfg.batch_size, num_threads=1, device_id=0)
+        pipe = Pipeline(batch_size=self.dataset_cfg.batch_size*2, num_threads=1, device_id=0)
         with pipe:
             styled_image = fn.external_source(source=eii, device='gpu', batch=True, cuda_stream=0, dtype=types.UINT8)
             styled_image = fn.random_resized_crop(styled_image, size=96) if self.dataset_cfg.augmentation.crop else styled_image
