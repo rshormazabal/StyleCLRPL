@@ -6,16 +6,16 @@ gpu_ids:                                                                # GPU ID
 train:                                                                     # PL trainer params. See PL trainer documentation.
   strategy: ddp
   precision: 32
-  max_epochs: 11
+  max_epochs: 100
   log_every_n_steps: 4
   check_val_every_n_epoch: 0
   amp_backend: native
   enable_checkpointing: True
-  linear_predictor_every_n_epoch: 1
+  linear_predictor_every_n_epoch: 5
 
 model:
   base_model: resnet50                                                     # Backbone model for SimCLR.
-  out_dim: 128                                                             # SimCLR output dimension.
+  out_dim: 1000                                                           # SimCLR output dimension.
   temperature: 0.07                                                        # InfoNCE temperature parameters.
   style_alpha: 0.8                                                         # AdaIn alpha (higher -> stronger style).
   style_vgg_path: /home/felix/StyleCLRPL/data/pretrained_models_adain/vgg_normalised.pth    # Style transfer VGG backbone network pretrained weights' path.
@@ -29,7 +29,7 @@ dataset:
     pickle_filename: style_precalculated_features.pkl                      # Precalculated style images embeddings generated with frozen backbone VGG.
     image_size: 96                                                         # Style image warp size (square).
     device: 6                                                              # Device to calculate preprocessed style embeddings.
-  dataset_name: cifar10                                                      # Dataset to use (stl10/cifar10)
+  dataset_name: cifar10                                                   # Dataset to use (stl10/cifar10)
   batch_size: 128                                                     # Main batch size.
   num_workers: 4                                                           # Main dataloader number of workers.
   n_views: 2

@@ -67,6 +67,14 @@ class ContentImageDataset:
         data_transforms = transforms.Compose([transforms.ToTensor()])
         return data_transforms
 
+    @staticmethod
+    def get_resize_transforms():
+        data_transforms = transforms.Compose([
+            transforms.Resize((256, 256)),
+            transforms.ToTensor()
+        ])
+        return data_transforms
+
 
     def calc_train_valid_split_lengths(self, dataset):
         dataset_len = len(dataset)
@@ -102,6 +110,28 @@ class ContentImageDataset:
                                                           download=True)
 
 
+    def get_imagenet(self):
+
+        train_dataset = datasets.ImageNet(self.cfg.data_path + "/imagenet", 
+                        split='train', 
+                        transform=self.get_resize_transforms())
+
+        # split_lengths = (40000, 10000, len(train_dataset) - 50000)
+        # train_dataset, valid_dataset, test_dataset = torch.utils.data.random_split(train_dataset, split_lengths)
+
+                        
+
+        valid_dataset = datasets.ImageNet(self.cfg.data_path + "/imagenet", 
+                        split='val', 
+                        transform=self.get_no_transforms())
+
+        test_dataset = datasets.ImageNet(self.cfg.data_path + "/imagenet", 
+                        split='test', 
+                        transform=self.get_no_transforms())
+
+        return train_dataset, valid_dataset, test_dataset
+
+
     def get_dataset_train_val_test(self):
         """
         Get datasets from torchvision. Downloads if files missing.
@@ -109,7 +139,8 @@ class ContentImageDataset:
         """
         valid_datasets = {
             'cifar10': self.get_cifar10,
-            # 'stl10': self.get_stl10      train/valid/test split not yet implemented
+            # 'stl10': self.get_stl10,      train/valid/test split not yet implemented
+            'imagenet': self.get_imagenet
         }
 
         try:
