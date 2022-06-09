@@ -53,15 +53,6 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         # linear predictor
         ##
 
-        self.linear_trainer = pl.Trainer(gpus=self.cfg.gpu_ids,
-            strategy=self.cfg.train.strategy,
-            precision=self.cfg.train.precision,
-            log_every_n_steps=1,
-            check_val_every_n_epoch=0,
-            amp_backend=self.cfg.train.amp_backend,
-            max_epochs=self.cfg.probe.epochs,
-        )
-
         train_data, valid_data, _ = ContentImageDataset(self.cfg).get_dataset_for_linear_probe()
 
         self.probe_train_dataloader = torch.utils.data.DataLoader(train_data,
@@ -157,12 +148,21 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
     
     def run_linear_predictor(self):
 
+        trainer = pl.Trainer(gpus=self.cfg.gpu_ids,
+            strategy=self.cfg.train.strategy,
+            precision=self.cfg.train.precision,
+            log_every_n_steps=1,
+            check_val_every_n_epoch=0,
+            amp_backend=self.cfg.train.amp_backend,
+            max_epochs=self.cfg.probe.epochs,
+        )
+
         downstream_model = ClassificationModel(self.cfg)
         downstream_model.model.get_params_from_resnetsimclr(self.model)
         downstream_model.model.freeze_conv_params()
         
-        self.linear_trainer.fit(downstream_model, self.probe_train_dataloader)
-        return self.linear_trainer.validate(downstream_model, self.probe_valid_dataloader)[0]
+        trainer.fit(downstream_model, self.probe_train_dataloader)
+        return trainer.validate(downstream_model, self.probe_valid_dataloader)[0]
 
 
     def info_nce_loss(self, features: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
