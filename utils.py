@@ -38,7 +38,6 @@ class LastEpochCheckpoint(ModelCheckpoint):
         :param every_k_epochs: Every how many epochs to save the checkpoint. [int]
         """
         super().__init__(*args, **kwargs)
-        assert every_k_epochs != 0, "every_k_epochs cannot be zero, just disable callback."
         self.every_k_epochs = every_k_epochs
 
         # save in the format /checkpoints/day/time/bas_model/

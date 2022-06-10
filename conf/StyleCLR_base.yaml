@@ -14,6 +14,9 @@ train:                                                                     # PL 
   check_val_every_n_epoch: 0
   amp_backend: native
   enable_checkpointing: True
+probe:
+  run_every_n_epoch: 1
+  epochs: 10
 model:
   base_model: resnet50                                                     # Backbone model for SimCLR.
   out_dim: 128                                                             # SimCLR output dimension.
@@ -37,8 +40,16 @@ dataset:
   batch_size: 64                                                           # Main batch size.
   num_workers: 4                                                           # Main dataloader number of workers.
   n_views: 2                                                               # Number of views to generate (currently supports 2)
-  data_path: /ROOT/datasets                                                # Content images path.
+  valid_split: 0.2                                                         # Ratio of dataset used as validation when no validation set present
+  test_split: 0.2                                                          # Ratio of dataset used as test when no test set is present.
   len_train_loader: set_at_runtime                                         # Holder for train dataloader size (used in scheduler).
+augment:
+  adain: False                                                            # Whether to apply adain as data augmentation
+  background_remover: False                                               # Whether to remove the background as data augmentation
+  size: 96                                                                # random crop and resize to this size
+  crop: True                                                              # Whether to add random crop, resize and flip in data augmentation
+  color: True                                                             # Whether to add color distortion and color drop in data augmentation
+  blur: True                                                              # Whether to add gaussain blur in data augmentation
 optimizer:
   lr: 0.0003                                                               # Main Learning rate.
   weight_decay: 0.0001                                                     # Weight decay.
@@ -53,4 +64,3 @@ callbacks:
   checkpoints:
     dirpath: ROOT/model_checkpoints/
     every_k_epochs: 5
-

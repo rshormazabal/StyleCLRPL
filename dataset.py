@@ -23,33 +23,30 @@ class StyleCLRPLDataset(pl.LightningDataModule, ABC):
         See PL documentation.
         :param cfg: Hydra format dataset configuration. [omegaconf.dictconfig.DictConfig]
         """
-        self.dataset_cfg = cfg
+        self.cfg = cfg
         self.train_dataset = None
-        self.content_dataset = None
+        self.stylized_dataset = None
+
         self.style_transform = None
         super().__init__()
 
     def setup(self, **kwargs):
-        # get content dataset
-        dataset = StyleContrastiveDataset(self.dataset_cfg)
-        self.content_dataset = dataset.get_dataset()
-
-        # get style dataset
-        self.train_dataset = StylizedDatasetOnGPU(content_dataset=self.content_dataset,
-                                                  style_data_path=self.dataset_cfg.style.data_path,
-                                                  style_pickle_filename=self.dataset_cfg.style.pickle_filename)
+        self.content_dataset = ContentImageDataset(self.cfg).get_dataset_for_simclr()
+        self.stylized_dataset = StylizedDatasetOnGPU(content_dataset=self.content_dataset,
+                                                     style_data_path=self.cfg.dataset.style.data_path,
+                                                     style_pickle_filename=self.cfg.dataset.style.pickle_filename)
 
     def train_dataloader(self):
-        return torch.utils.data.DataLoader(self.train_dataset,
+        return torch.utils.data.DataLoader(self.stylized_dataset,
                                            # sampler=SubsetRandomSampler(torch.randperm(len(self.train_dataset))[:1000]), # in case need to test with less data
-                                           batch_size=self.dataset_cfg.batch_size,
+                                           batch_size=self.cfg.dataset.batch_size,
                                            shuffle=True,
-                                           num_workers=self.dataset_cfg.num_workers,
+                                           num_workers=self.cfg.dataset.num_workers,
                                            pin_memory=True,
                                            drop_last=True)
 
 
-class StyleContrastiveDataset:
+class ContentImageDataset:
     def __init__(self, cfg: DictConfig) -> None:
         """
         Base dataset class. Only downloads data and applies only ToTensor transform.
@@ -63,15 +60,28 @@ class StyleContrastiveDataset:
         data_transforms = transforms.Compose([transforms.ToTensor()])
         return data_transforms
 
-    def get_dataset(self):
-        """
-        Get datasets from torchvision. Downloads if files missing.
-        :return:
-        """
-        valid_datasets = {'cifar10': lambda: datasets.CIFAR10(self.cfg.data_path,
-                                                              train=True,
-                                                              transform=self.get_no_transforms(),
-                                                              download=True),
+    @staticmethod
+    def get_resize_transforms():
+        data_transforms = transforms.Compose([
+            transforms.Resize((256, 256)),
+            transforms.ToTensor()
+        ])
+        return data_transforms
+
+    def split_train_valid_dataset(self, dataset):
+        dataset_len = len(dataset)
+        valid_split = self.cfg.dataset.valid_split / (1 - self.cfg.dataset.test_split)
+        valid_len = int(dataset_len * valid_split)
+        train_len = dataset_len - valid_len
+        train_dataset, valid_dataset = torch.utils.data.random_split(dataset, (train_len, valid_len))
+        return train_dataset, valid_dataset
+
+    def get_cifar10(self):
+
+        train_valid_dataset = datasets.CIFAR10(self.cfg.dataset.content.path,
+                                               train=True,
+                                               transform=self.get_no_transforms(),
+                                               download=True)
 
         train_dataset, valid_dataset = self.split_train_valid_dataset(train_valid_dataset)
 
@@ -148,7 +158,27 @@ class StyleContrastiveDataset:
                           'imagenet': lambda: self.get_imagenet()}
 
         try:
-            dataset_fn = valid_datasets[self.cfg.dataset_name]
+            dataset_fn = valid_datasets[self.cfg.dataset.content.name]
+        except KeyError:
+            raise InvalidDatasetSelection()
+        else:
+            return dataset_fn()
+
+    def get_dataset_for_simclr(self):
+        """
+        Get datasets for the simclr. We only need the training dataset, and unlabeled is fine.
+        Returns one dataset
+        """
+
+        if self.cfg.augment.background_remover:
+            valid_datasets = {'stl10': lambda: self.get_stl10_bg()}
+        else:
+            valid_datasets = {'cifar10': lambda: self.get_cifar10()[0],
+                              'stl10': lambda: self.get_stl10_unlabeled(),
+                              'imagenet': lambda: self.get_imagenet()[0]}
+
+        try:
+            dataset_fn = valid_datasets[self.cfg.dataset.content.name]
         except KeyError:
             raise InvalidDatasetSelection()
         else:
@@ -202,6 +232,7 @@ class StylizedDatasetOnGPU:
         content = self.content_tf(self.toPIL(content_image))
 
         return [content,
+                transparancy,
                 self.style_embeddings[sampled_styles[0]],
                 self.style_embeddings[sampled_styles[1]]], -1
 

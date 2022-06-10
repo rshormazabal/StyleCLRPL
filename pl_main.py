@@ -5,7 +5,7 @@ import hydra
 import pytorch_lightning as pl
 import torch
 from omegaconf import DictConfig
-from pytorch_lightning.callbacks import ModelSummary, LearningRateMonitor, ModelCheckpoint
+from pytorch_lightning.callbacks import ModelSummary, LearningRateMonitor
 from torch.utils.data import DataLoader
 from torchvision.transforms import transforms
 from tqdm import tqdm
@@ -16,7 +16,7 @@ from lightning_modules import StyleCLRPLModel
 from utils import LastEpochCheckpoint
 
 
-@hydra.main(config_path="conf", config_name="StyleCLR_base")
+@hydra.main(config_path="conf", config_name="StyleCLR_test")
 def main(cfg: DictConfig) -> None:
     """
     Main training class. All parameters are defined in the yaml Hydra configuration.
@@ -27,7 +27,7 @@ def main(cfg: DictConfig) -> None:
     pl.seed_everything(cfg.seed)
 
     # base setup
-    data = StyleCLRPLDataset(cfg.dataset)
+    data = StyleCLRPLDataset(cfg)
     data.setup()
 
     # set dataloader len for schduler
@@ -36,7 +36,7 @@ def main(cfg: DictConfig) -> None:
     # checkpoint callback, saves last model every k epochs. Better than implementing directly in the PL logic since
     # it can have problems on DDP if main process not set corectly.
     checkpoint_callback = LastEpochCheckpoint(dirpath=cfg.callbacks.checkpoints.dirpath,
-                                              dataset_name=cfg.dataset.dataset_name,
+                                              dataset_name=cfg.dataset.content.name,
                                               base_model_name=cfg.model.base_model,
                                               every_k_epochs=cfg.callbacks.checkpoints.every_k_epochs)
     # profiler
