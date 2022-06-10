@@ -88,7 +88,7 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         :return: Dictionary with per-batch loss and metrics. [dict]
         """
         # get content images and create two views
-        content_images, style_feats1, style_feats2 = batch[0]
+        content_images, transparency, style_feats1, style_feats2 = batch[0]
 
         content_images = torch.cat([content_images for _ in range(2)], dim=0)
         style_feats = torch.cat([style_feats1, style_feats2], dim=0)
@@ -102,6 +102,10 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
             styled_images = styled_images * self.alpha + content_feats * (1 - self.alpha)
 
             styled_images = self.style_decoder(styled_images)
+
+            if transparency is not None:
+                transparency = torch.cat([transparency for _ in range(2)], dim=0)
+                styled_images = transparency * content_images + (1 - transparency) * styled_images
 
         # augmented views contrastive setup
         features = self.model(styled_images)

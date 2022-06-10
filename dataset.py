@@ -45,7 +45,6 @@ class StyleCLRPLDataset(pl.LightningDataModule, ABC):
                                            pin_memory=True,
                                            drop_last=True)
 
-
 class ContentImageDataset:
     def __init__(self, cfg: DictConfig) -> None:
         """
@@ -116,6 +115,25 @@ class ContentImageDataset:
                                         transform=self.get_no_transforms(),
                                         download=True)
 
+    def get_stl10_bg(self):
+        class TransparencyDataset:
+            def __init__(self, RGB, RGBA):
+                assert len(RGB) == len(RGBA)
+                self.RGB = RGB
+                self.RGBA = RGBA
+            
+            def __len__(self):
+                return len(self.RGB)
+            
+            def __getitem__(self, index):
+                return torch.cat([self.RGB[index][0], transforms.ToTensor()(self.RGBA[index][0])[[3], ...]], dim=0), -1
+                
+
+        with open(self.cfg.dataset.content.bg_path, "rb") as fd:
+            return TransparencyDataset(
+                datasets.STL10(self.cfg.dataset.content.path, split='unlabeled', download=True, transform=self.get_no_transforms()),
+                pickle.load(fd)['unlabeled']
+            )
 
     def get_imagenet(self):
 
@@ -142,6 +160,7 @@ class ContentImageDataset:
         valid_datasets = {
             'cifar10': lambda: self.get_cifar10(),
             'stl10': lambda: self.get_stl10_labeled(),   
+            'stl10_bg': lambda: self.get_stl10_labeled(),
             'imagenet': lambda: self.get_imagenet()
         }
 
@@ -160,6 +179,7 @@ class ContentImageDataset:
         valid_datasets = {
             'cifar10': lambda: self.get_cifar10()[0],
             'stl10': lambda: self.get_stl10_unlabeled(),   
+            'stl10_bg': lambda: self.get_stl10_bg(),
             'imagenet': lambda: self.get_imagenet()[0]
         }
 
@@ -210,9 +230,15 @@ class StylizedDatasetOnGPU:
 
         # get content image
         content_image = self.content_dataset[idx][0]
+        if content_image.shape[0] == 4:             # RGBA
+            transparancy = content_image[3, None, ...]
+            content_image = content_image[:3, ...]
+        else:
+            transparancy = None
         content = self.content_tf(self.toPIL(content_image))
 
         return [content,
+                transparancy,
                 self.style_embeddings[sampled_styles[0]],
                 self.style_embeddings[sampled_styles[1]]], -1
 
