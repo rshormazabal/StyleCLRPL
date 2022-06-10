@@ -176,12 +176,17 @@ class ContentImageDataset:
         Get datasets for the simclr. We only need the training dataset, and unlabeled is fine.
         Returns one dataset
         """
-        valid_datasets = {
-            'cifar10': lambda: self.get_cifar10()[0],
-            'stl10': lambda: self.get_stl10_unlabeled(),   
-            'stl10_bg': lambda: self.get_stl10_bg(),
-            'imagenet': lambda: self.get_imagenet()[0]
-        }
+
+        if self.cfg.augment.background_remover:
+            valid_datasets = {  
+                'stl10': lambda: self.get_stl10_bg(),
+            }
+        else:            
+            valid_datasets = {
+                'cifar10': lambda: self.get_cifar10()[0],
+                'stl10': lambda: self.get_stl10_unlabeled(),   
+                'imagenet': lambda: self.get_imagenet()[0]
+            }
 
         try:
             dataset_fn = valid_datasets[self.cfg.dataset.content.name]
@@ -234,7 +239,7 @@ class StylizedDatasetOnGPU:
             transparancy = content_image[3, None, ...]
             content_image = content_image[:3, ...]
         else:
-            transparancy = None
+            transparancy = []
         content = self.content_tf(self.toPIL(content_image))
 
         return [content,

@@ -3,6 +3,11 @@ from inspect import classify_class_attrs
 
 from typing import Tuple
 
+import nvidia.dali.fn as fn
+from nvidia.dali.plugin.pytorch import feed_ndarray
+from nvidia.dali.pipeline import Pipeline
+import nvidia.dali.types as types
+
 import pytorch_lightning as pl
 import torch
 from pytorch_lightning.utilities.types import STEP_OUTPUT, EPOCH_OUTPUT
@@ -25,22 +30,19 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         super().__init__()
         # config files
         self.cfg = cfg
-        self.dataset_cfg = cfg.dataset
-        self.model_cfg = cfg.model
-        self.optimizer_cfg = cfg.optimizer
 
         # parameters for style transfer
         self.alpha = cfg.model.style_alpha
 
         # SimCLR model and style networks
-        self.model = ResNetSimCLR(model_cfg=self.model_cfg)
+        self.model = ResNetSimCLR(model_cfg=self.cfg.model)
         self.style_vgg = adain.vgg
         self.style_decoder = adain.decoder
 
         # load VGG pretrained weights
         print('Loading VGG and decoder weights.')
-        self.style_vgg.load_state_dict(torch.load(self.model_cfg.style_vgg_path))
-        self.style_decoder.load_state_dict(torch.load(self.model_cfg.style_decoder_path))
+        self.style_vgg.load_state_dict(torch.load(self.cfg.model.style_vgg_path))
+        self.style_decoder.load_state_dict(torch.load(self.cfg.model.style_decoder_path))
 
         # drop last backbone layers
         self.style_vgg = Sequential(*list(self.style_vgg.children())[:31])
@@ -56,16 +58,16 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         train_data, valid_data, _ = ContentImageDataset(self.cfg).get_dataset_for_linear_probe()
 
         self.probe_train_dataloader = torch.utils.data.DataLoader(train_data,
-                        batch_size=self.dataset_cfg.batch_size,
+                        batch_size=self.cfg.dataset.batch_size,
                         shuffle=True,
-                        num_workers=self.dataset_cfg.num_workers,
+                        num_workers=self.cfg.dataset.num_workers,
                         pin_memory=True,
                         drop_last=True)
 
         self.probe_valid_dataloader = torch.utils.data.DataLoader(valid_data,
-                        batch_size=self.dataset_cfg.batch_size,
+                        batch_size=self.cfg.dataset.batch_size,
                         shuffle=False,
-                        num_workers=self.dataset_cfg.num_workers,
+                        num_workers=self.cfg.dataset.num_workers,
                         pin_memory=True,
                         drop_last=True)
 
@@ -80,6 +82,7 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         """
         return self.model(images)
 
+
     def training_step(self, batch: list) -> STEP_OUTPUT:
         """
         Compute and return the training loss and some additional metrics for e.g. the progress bar or logger.
@@ -93,19 +96,30 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         content_images = torch.cat([content_images for _ in range(2)], dim=0)
         style_feats = torch.cat([style_feats1, style_feats2], dim=0)
 
-        # style transfer
-        with torch.no_grad():
-            assert (0.0 <= self.alpha <= 1.0)
-            content_feats = self.style_vgg(content_images)
+        styled_images = content_images
 
-            styled_images = adaptive_instance_normalization(content_feats, style_feats)
-            styled_images = styled_images * self.alpha + content_feats * (1 - self.alpha)
+        ######################
+        # Augment the images #
+        ######################
 
-            styled_images = self.style_decoder(styled_images)
+        if self.cfg.augment.adain:
+            with torch.no_grad():
+                assert (0.0 <= self.alpha <= 1.0)
+                content_feats = self.style_vgg(styled_images)
 
-            if transparency is not None:
+                styled_images = adaptive_instance_normalization(content_feats, style_feats)
+                styled_images = styled_images * self.alpha + content_feats * (1 - self.alpha)
+
+                styled_images = self.style_decoder(styled_images)
+
+        if self.cfg.augment.background_remover:
+            with torch.no_grad():
                 transparency = torch.cat([transparency for _ in range(2)], dim=0)
                 styled_images = transparency * content_images + (1 - transparency) * styled_images
+
+        if self.cfg.augment.crop or self.cfg.augment.color or self.cfg.augment.blur:
+            styled_images = self.data_augmentation(styled_images)
+
 
         # augmented views contrastive setup
         features = self.model(styled_images)
@@ -119,6 +133,46 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
                 'loss': loss,
                 'nce/top1': top1[0].detach(),
                 'nce/top5': top5[0].detach()}
+
+
+    def data_augmentation(self, styled_images):
+        class ExternalInputGPUIterator(object):
+            def __init__(self, images):
+                self.images = 255*images.permute(0,2,3,1).contiguous() 
+
+            def __iter__(self):
+                self.i=0
+                self.n=self.images.shape[0]
+                return self
+
+            def __next__(self):
+                return [self.images[i,:,:,:].type(torch.uint8) for i in range(self.n)]
+
+        eii = ExternalInputGPUIterator(styled_images)
+        pipe = Pipeline(batch_size=self.cfg.dataset.batch_size*2, num_threads=1, device_id=self.cfg.dataset.style.device)
+        with pipe:
+            styled_image = fn.external_source(source=eii, device='gpu', batch=True, cuda_stream=0, dtype=types.UINT8)
+            styled_image = fn.random_resized_crop(styled_image, size=self.cfg.augment.size) if self.cfg.augment.crop else styled_image
+            styled_image = fn.flip(styled_image, horizontal=1, vertical=0) if torch.rand(1)<0.5 and self.cfg.augment.crop else styled_image
+            b,c,s = torch.distributions.uniform.Uniform(1-0.8, 1+0.8).sample([3,])
+            h = torch.distributions.uniform.Uniform(-0.2, 0.2).sample([1,])
+            styled_image = fn.color_twist(styled_image, brightness=b, contrast=c, saturation=s, hue=h) if torch.rand(1)<0.8 and self.cfg.augment.color else styled_image #only accept hwc
+            styled_image = fn.color_space_conversion(styled_image, image_type=types.RGB, output_type=types.GRAY) if torch.rand(1)<0.2 and self.cfg.augment.color else styled_image #only accept hwc, uint8
+            styled_image = fn.gaussian_blur(styled_image, window_size=int(0.1*self.cfg.augment.size)) if self.cfg.augment.blur else styled_image
+            pipe.set_outputs(styled_image)
+        pipe.build()
+        styled_image=pipe.run()
+        
+        styled_image = styled_image[0].as_tensor() # type:TensorGPU
+        
+        styled_augmented_images = torch.zeros(styled_image.shape(), dtype=torch.uint8).cuda()
+        feed_ndarray(styled_image, styled_augmented_images)
+        styled_augmented_images = styled_augmented_images.permute(0,3,1,2).type(styled_images.dtype)/225.
+        c=styled_augmented_images.shape[1]
+        if c==1:
+            styled_augmented_images = styled_augmented_images.repeat(1,3,1,1)
+
+        return styled_augmented_images
 
 
     def training_step_end(self, step_outputs: STEP_OUTPUT) -> STEP_OUTPUT:
@@ -176,7 +230,7 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         :return: logits tensor for all views with labels (zeros). [torch.Tensor, torch.Tensor]
         """
         # create labels different views (positive pairs are augmented views of same image)
-        labels = [torch.arange(self.dataset_cfg.batch_size, device=features.device) for _ in range(self.dataset_cfg.n_views)]
+        labels = [torch.arange(self.cfg.dataset.batch_size, device=features.device) for _ in range(self.cfg.dataset.n_views)]
         labels = torch.cat(labels, dim=0)
         labels = (labels.unsqueeze(0) == labels.unsqueeze(1)).float()
 
@@ -199,7 +253,7 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         logits = torch.cat([positives, negatives], dim=1)
         labels = torch.zeros(logits.shape[0], dtype=torch.long, device=features.device)
 
-        logits = logits / self.model_cfg.temperature
+        logits = logits / self.cfg.model.temperature
         return logits, labels
 
 
@@ -210,11 +264,11 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         :return:
         """
         optimizer = torch.optim.Adam(self.model.parameters(),
-                                     self.optimizer_cfg.lr,
-                                     weight_decay=self.optimizer_cfg.weight_decay)
+                                     self.cfg.optimizer.lr,
+                                     weight_decay=self.cfg.optimizer.weight_decay)
 
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
-                                                               T_max=self.dataset_cfg.len_train_loader,
+                                                               T_max=self.cfg.dataset.len_train_loader,
                                                                eta_min=0,
                                                                last_epoch=-1)
         return [optimizer], [{"scheduler": scheduler}]
@@ -233,12 +287,9 @@ class ClassificationModel(pl.LightningModule, ABC):
         super().__init__()
         # config files
         self.cfg = cfg
-        self.dataset_cfg = cfg.dataset
-        self.model_cfg = cfg.model
-        self.optimizer_cfg = cfg.optimizer
         
         # Downstream Classification Model
-        self.model = ResNetDownStream(model_cfg=self.model_cfg)
+        self.model = ResNetDownStream(model_cfg=self.cfg.model)
 
 
     def forward(self, images: torch.Tensor, *args, **kwargs) -> torch.Tensor:
@@ -327,11 +378,11 @@ class ClassificationModel(pl.LightningModule, ABC):
         :return:
         """
         optimizer = torch.optim.Adam(self.model.parameters(),
-                                     self.optimizer_cfg.lr,
-                                     weight_decay=self.optimizer_cfg.weight_decay)
+                                     self.cfg.optimizer.lr,
+                                     weight_decay=self.cfg.optimizer.weight_decay)
 
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
-                                                               T_max=self.dataset_cfg.len_train_loader,
+                                                               T_max=self.cfg.dataset.len_train_loader,
                                                                eta_min=0,
                                                                last_epoch=-1)
         return [optimizer], [{"scheduler": scheduler}]
