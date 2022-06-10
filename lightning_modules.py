@@ -49,25 +49,22 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         self.style_vgg = self.style_vgg.eval()
         self.style_decoder = self.style_decoder.eval()
 
-        ##
-        # linear predictor
-        ##
-
-        train_data, valid_data, _ = ContentImageDataset(self.cfg).get_dataset_for_linear_probe()
+        ### linear predictor
+        train_data, val_data, _ = ContentImageDataset(self.cfg).get_dataset_for_linear_probe()
 
         self.probe_train_dataloader = DataLoader(train_data,
-                                                 batch_size=self.cfg.dataset.batch_size,
+                                                 batch_size=512,
                                                  shuffle=True,
                                                  num_workers=self.cfg.dataset.num_workers,
                                                  pin_memory=True,
                                                  drop_last=True)
 
-        self.probe_valid_dataloader = DataLoader(valid_data,
-                                                 batch_size=self.cfg.dataset.batch_size,
-                                                 shuffle=False,
-                                                 num_workers=self.cfg.dataset.num_workers,
-                                                 pin_memory=True,
-                                                 drop_last=True)
+        self.probe_val_dataloader = DataLoader(val_data,
+                                               batch_size=128,
+                                               shuffle=False,
+                                               num_workers=self.cfg.dataset.num_workers,
+                                               pin_memory=True,
+                                               drop_last=True)
 
     def forward(self, images: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         """
@@ -150,7 +147,8 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
             styled_image = fn.flip(styled_image, horizontal=1, vertical=0) if torch.rand(1) < 0.5 and self.cfg.augment.crop else styled_image
             b, c, s = torch.distributions.uniform.Uniform(1 - 0.8, 1 + 0.8).sample([3, ])
             h = torch.distributions.uniform.Uniform(-0.2, 0.2).sample([1, ])
-            styled_image = fn.color_twist(styled_image, brightness=b, contrast=c, saturation=s, hue=h) if torch.rand(1) < 0.8 and self.cfg.augment.color else styled_image  # only accept hwc
+            styled_image = fn.color_twist(styled_image, brightness=b, contrast=c, saturation=s, hue=h) if torch.rand(
+                1) < 0.8 and self.cfg.augment.color else styled_image  # only accept hwc
             styled_image = fn.color_space_conversion(styled_image, image_type=types.RGB, output_type=types.GRAY) if torch.rand(
                 1) < 0.2 and self.cfg.augment.color else styled_image  # only accept hwc, uint8
             styled_image = fn.gaussian_blur(styled_image, window_size=int(0.1 * self.cfg.augment.size)) if self.cfg.augment.blur else styled_image
@@ -199,10 +197,10 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
     def run_linear_predictor(self):
 
         trainer = pl.Trainer(gpus=self.cfg.gpu_ids,
-                             strategy=self.cfg.train.strategy,
-                             precision=self.cfg.train.precision,
+                             strategy=None,
+                             precision=32,
                              log_every_n_steps=1,
-                             amp_backend=self.cfg.train.amp_backend,
+                             amp_backend='native',
                              max_epochs=self.cfg.probe.epochs)
 
         downstream_model = ClassificationModel(self.cfg)
@@ -210,7 +208,7 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         downstream_model.model.freeze_conv_params()
 
         trainer.fit(downstream_model, self.probe_train_dataloader)
-        return trainer.validate(downstream_model, self.probe_valid_dataloader)[0]
+        return trainer.validate(downstream_model, self.probe_val_dataloader)[0]
 
     def info_nce_loss(self, features: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -352,11 +350,7 @@ class ClassificationModel(pl.LightningModule, ABC):
         :return:
         """
         optimizer = torch.optim.Adam(self.model.parameters(),
-                                     self.cfg.optimizer.lr,
-                                     weight_decay=self.cfg.optimizer.weight_decay)
+                                     lr=0.2,  # 0.1 * batch_size/256
+                                     weight_decay=0)
 
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
-                                                               T_max=self.cfg.dataset.len_train_loader,
-                                                               eta_min=0,
-                                                               last_epoch=-1)
-        return [optimizer], [{"scheduler": scheduler}]
+        return optimizer

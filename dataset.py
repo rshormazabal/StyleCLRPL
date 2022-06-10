@@ -2,15 +2,15 @@ import os
 import pickle
 from abc import ABC
 
+import numpy as np
 import pandas as pd
 import pytorch_lightning as pl
 import torch
 from PIL import Image
-from torch.utils.data import Dataset
+from omegaconf import DictConfig
+from torch.utils.data import Dataset, Subset
 from torchvision import transforms, datasets
 from torchvision.transforms import transforms, Compose
-
-from omegaconf import DictConfig
 
 from data_aug.style_transforms import test_transform
 from exceptions.exceptions import InvalidDatasetSelection
@@ -61,6 +61,12 @@ class ContentImageDataset:
         return data_transforms
 
     @staticmethod
+    def get_probe_transforms(size):
+        data_transforms = transforms.Compose([transforms.RandomResizedCrop(size=size),
+                                              transforms.ToTensor()])
+        return data_transforms
+
+    @staticmethod
     def get_resize_transforms():
         data_transforms = transforms.Compose([
             transforms.Resize((256, 256)),
@@ -70,41 +76,50 @@ class ContentImageDataset:
 
     def split_train_valid_dataset(self, dataset):
         dataset_len = len(dataset)
-        valid_split = self.cfg.dataset.valid_split / (1 - self.cfg.dataset.test_split)
-        valid_len = int(dataset_len * valid_split)
-        train_len = dataset_len - valid_len
-        train_dataset, valid_dataset = torch.utils.data.random_split(dataset, (train_len, valid_len))
-        return train_dataset, valid_dataset
+        # TODO: why are we taking the test split part? they are loaded separatelly.
+        val_split = self.cfg.dataset.val_split / (1 - self.cfg.dataset.test_split)
+        val_len = int(dataset_len * val_split)
+        train_len = dataset_len - val_len
+        train_dataset, val_dataset = torch.utils.data.random_split(dataset, (train_len, val_len))
+        return train_dataset, val_dataset
 
     def get_cifar10(self):
 
-        train_valid_dataset = datasets.CIFAR10(self.cfg.dataset.content.path,
-                                               train=True,
-                                               transform=self.get_no_transforms(),
-                                               download=True)
+        train_val_dataset = datasets.CIFAR10(self.cfg.dataset.content.path,
+                                             train=True,
+                                             transform=self.get_no_transforms(),
+                                             download=True)
 
-        train_dataset, valid_dataset = self.split_train_valid_dataset(train_valid_dataset)
+        train_dataset, val_dataset = self.split_train_valid_dataset(train_val_dataset)
 
         test_dataset = datasets.CIFAR10(self.cfg.dataset.content.path,
                                         train=False,
                                         transform=self.get_no_transforms(),
                                         download=True)
 
-        return train_dataset, valid_dataset, test_dataset
+        return train_dataset, val_dataset, test_dataset
 
     def get_stl10_labeled(self):
+        # need to add transformations used in paper: random cropping
+        indices = list(range(5000))
+        split = int(np.floor(self.cfg.dataset.val_split * 5000))
 
-        train_valid_dataset = datasets.STL10(self.cfg.dataset.content.path, split='train',
-                                             transform=self.get_no_transforms(),
-                                             download=True)
+        train_idx, val_idx = indices[split:], indices[:split]
 
-        train_dataset, valid_dataset = self.split_train_valid_dataset(train_valid_dataset)
+        # need to load two distinc datasets train and val because they have different transforms.
+        train_dataset = datasets.STL10(self.cfg.dataset.content.path, split='train',
+                                       transform=self.get_probe_transforms(96),
+                                       download=True)
+
+        val_dataset = datasets.STL10(self.cfg.dataset.content.path, split='train',
+                                     transform=self.get_no_transforms(),
+                                     download=False)
 
         test_dataset = datasets.STL10(self.cfg.dataset.content.path, split='test',
                                       transform=self.get_no_transforms(),
-                                      download=True)
+                                      download=False)
 
-        return train_dataset, valid_dataset, test_dataset
+        return Subset(train_dataset, train_idx), Subset(val_dataset, val_idx), test_dataset
 
     def get_stl10_unlabeled(self):
 
@@ -137,28 +152,28 @@ class ContentImageDataset:
                                           split='train',
                                           transform=self.get_resize_transforms())
 
-        valid_dataset = datasets.ImageNet(self.cfg.dataset.content.path,
-                                          split='val',
-                                          transform=self.get_no_transforms())
+        val_dataset = datasets.ImageNet(self.cfg.dataset.content.path,
+                                        split='val',
+                                        transform=self.get_no_transforms())
 
         test_dataset = datasets.ImageNet(self.cfg.dataset.content.path,
                                          split='test',
                                          transform=self.get_no_transforms())
 
-        return train_dataset, valid_dataset, test_dataset
+        return train_dataset, val_dataset, test_dataset
 
     def get_dataset_for_linear_probe(self):
         """
         Get datasets for the linear probe. We need a training, a validation and a test dataset.
         Everything should be labeled.
         """
-        valid_datasets = {'cifar10': lambda: self.get_cifar10(),
-                          'stl10': lambda: self.get_stl10_labeled(),
-                          'stl10_bg': lambda: self.get_stl10_labeled(),
-                          'imagenet': lambda: self.get_imagenet()}
+        val_datasets = {'cifar10': lambda: self.get_cifar10(),
+                        'stl10': lambda: self.get_stl10_labeled(),
+                        'stl10_bg': lambda: self.get_stl10_labeled(),
+                        'imagenet': lambda: self.get_imagenet()}
 
         try:
-            dataset_fn = valid_datasets[self.cfg.dataset.content.name]
+            dataset_fn = val_datasets[self.cfg.dataset.content.name]
         except KeyError:
             raise InvalidDatasetSelection()
         else:
@@ -171,14 +186,14 @@ class ContentImageDataset:
         """
 
         if self.cfg.augment.background_remover:
-            valid_datasets = {'stl10': lambda: self.get_stl10_bg()}
+            val_datasets = {'stl10': lambda: self.get_stl10_bg()}
         else:
-            valid_datasets = {'cifar10': lambda: self.get_cifar10()[0],
-                              'stl10': lambda: self.get_stl10_unlabeled(),
-                              'imagenet': lambda: self.get_imagenet()[0]}
+            val_datasets = {'cifar10': lambda: self.get_cifar10()[0],
+                            'stl10': lambda: self.get_stl10_unlabeled(),
+                            'imagenet': lambda: self.get_imagenet()[0]}
 
         try:
-            dataset_fn = valid_datasets[self.cfg.dataset.content.name]
+            dataset_fn = val_datasets[self.cfg.dataset.content.name]
         except KeyError:
             raise InvalidDatasetSelection()
         else:
