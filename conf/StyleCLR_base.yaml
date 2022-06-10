@@ -1,7 +1,7 @@
 model_name: StyleCLR_base                                                  # Model name for loggin (neptune).
-root_path: /home/felix/StyleCLRPL/                                                          # Project main root.
+root_path: /ROOT/                                                          # Project main root.
 seed: 10                                                                   # Random seed in random, torch, pandas and cuda.
-gpu_ids:                                                                # GPU ID's as list.
+gpu_ids:                                                                   # GPU ID's as list.
     - 6
 train:                                                                     # PL trainer params. See PL trainer documentation.
   strategy: ddp
@@ -19,34 +19,34 @@ model:
   out_dim: 128                                                             # SimCLR output dimension.
   temperature: 0.07                                                        # InfoNCE temperature parameters.
   style_alpha: 0.8                                                         # AdaIn alpha (higher -> stronger style).
-  style_vgg_path: /home/felix/StyleCLRPL/data/pretrained_models_adain/vgg_normalised.pth    # Style transfer VGG backbone network pretrained weights' path.
-  style_decoder_path: /home/felix/StyleCLRPL/data/pretrained_models_adain/decoder.pth       # Style transfer decoder network pretrained weights' path.
+  style_vgg_path: /ROOT/data/pretrained_models_adain/vgg_normalised.pth    # Style transfer VGG backbone network pretrained weights' path.
+  style_decoder_path: /ROOT/data/pretrained_models_adain/decoder.pth       # Style transfer decoder network pretrained weights' path.
 dataset:
   style:
     recalculate_vgg_embeddings: False                                      # Whether to calculate pretrained embeddings for style images.
-    data_path: /home/felix/StyleCLRPL/data/                                 # Style data path (metadata and images).
+    data_path: /ROOT/data/                                                 # Style data path (metadata and images).
     image_path: style_augmentation_images/                                 # Style images folder name.
     metadata_filename: train_info_1000.csv                                 # Style dataset metadata CSV filename.
     pickle_filename: style_precalculated_features.pkl                      # Precalculated style images embeddings generated with frozen backbone VGG.
     image_size: 96                                                         # Style image warp size (square).
-    device: 6                                                               # Device to calculate preprocessed style embeddings.
+    device: 6                                                              # Device to calculate preprocessed style embeddings.
   content:
-    name: stl10                                                        # Dataset to use (stl10/cifar10)
-    path: /home/felix/StyleCLRPL/datasets/stl10                            # Content images path.
-    bg_path: /home/felix/StyleCLRPL/datasets/stl10/stl10_bg.pkl             # Path to the stl10 background masking pickle
-  batch_size: 64                                                     # Main batch size.
+    name: stl10                                                            # Dataset to use (stl10/cifar10)
+    path: /ROOT/datasets/stl10                                             # Content images path.
+    bg_path: /ROOT/datasets/stl10/stl10_bg.pkl                             # Path to the stl10 background masking pickle
+  batch_size: 64                                                           # Main batch size.
   num_workers: 4                                                           # Main dataloader number of workers.
-  n_views: 2                                                              # Number of views to generate (currently supports 2)
-  valid_split: 0.2                                                      # Ratio of dataset used as validation when no validation set present
-  test_split: 0.2                                                         # Ratio of dataset used as test when no test set is present.
+  n_views: 2                                                               # Number of views to generate (currently supports 2)
+  valid_split: 0.2                                                         # Ratio of dataset used as validation when no validation set present
+  test_split: 0.2                                                          # Ratio of dataset used as test when no test set is present.
   len_train_loader: set_at_runtime                                         # Holder for train dataloader size (used in scheduler).
 augment:
-  adain: False                                                            # Whether to apply adain as data augmentation
-  background_remover: False                                               # Whether to remove the background as data augmentation
-  size: 96                                                               # random crop and resize to this size
-  crop: True                                                             # Whether to add random crop, resize and flip in data augmentation 
-  color: True                                                           # Whether to add color distortion and color drop in data augmentation
-  blur: True                                                          # Whether to add gaussain blur in data augmentation
+  adain: False                                                             # Whether to apply adain as data augmentation
+  background_remover: False                                                # Whether to remove the background as data augmentation
+  size: 96                                                                 # random crop and resize to this size
+  crop: True                                                               # Whether to add random crop, resize and flip in data augmentation
+  color: True                                                              # Whether to add color distortion and color drop in data augmentation
+  blur: True                                                               # Whether to add gaussain blur in data augmentation
 optimizer:
   lr: 0.0003                                                               # Main Learning rate.
   weight_decay: 0.0001                                                     # Weight decay.
@@ -59,6 +59,6 @@ logger:
   api_key: NEPTUNE_API_TOKEN                                               # Neptune API token.
 callbacks:
   checkpoints:
-    dirpath: /home/felix/StyleCLRPL/model_checkpoints/
+    dirpath: /ROOT/model_checkpoints/
     every_k_epochs: 5
 

@@ -26,15 +26,15 @@ class StyleCLRPLDataset(pl.LightningDataModule, ABC):
         self.cfg = cfg
         self.train_dataset = None
         self.stylized_dataset = None
-
+        self.content_dataset = None
         self.style_transform = None
         super().__init__()
 
     def setup(self, **kwargs):
         self.content_dataset = ContentImageDataset(self.cfg).get_dataset_for_simclr()
         self.stylized_dataset = StylizedDatasetOnGPU(content_dataset=self.content_dataset,
-                                                  style_data_path=self.cfg.dataset.style.data_path,
-                                                  style_pickle_filename=self.cfg.dataset.style.pickle_filename)
+                                                     style_data_path=self.cfg.dataset.style.data_path,
+                                                     style_pickle_filename=self.cfg.dataset.style.pickle_filename)
 
     def train_dataloader(self):
         return torch.utils.data.DataLoader(self.stylized_dataset,
@@ -44,6 +44,7 @@ class StyleCLRPLDataset(pl.LightningDataModule, ABC):
                                            num_workers=self.cfg.dataset.num_workers,
                                            pin_memory=True,
                                            drop_last=True)
+
 
 class ContentImageDataset:
     def __init__(self, cfg: DictConfig) -> None:
@@ -61,12 +62,9 @@ class ContentImageDataset:
 
     @staticmethod
     def get_resize_transforms():
-        data_transforms = transforms.Compose([
-            transforms.Resize((256, 256)),
-            transforms.ToTensor()
-        ])
+        data_transforms = transforms.Compose([transforms.Resize((256, 256)),
+                                              transforms.ToTensor()])
         return data_transforms
-
 
     def split_train_valid_dataset(self, dataset):
         dataset_len = len(dataset)
@@ -76,93 +74,86 @@ class ContentImageDataset:
         train_dataset, valid_dataset = torch.utils.data.random_split(dataset, (train_len, valid_len))
         return train_dataset, valid_dataset
 
-    
     def get_cifar10(self):
 
-        train_valid_dataset = datasets.CIFAR10(self.cfg.dataset.content.path, 
-                                                train=True, 
-                                                transform=self.get_no_transforms(), 
-                                                download=True)
+        train_valid_dataset = datasets.CIFAR10(self.cfg.dataset.content.path,
+                                               train=True,
+                                               transform=self.get_no_transforms(),
+                                               download=True)
 
         train_dataset, valid_dataset = self.split_train_valid_dataset(train_valid_dataset)
 
-        test_dataset = datasets.CIFAR10(self.cfg.dataset.content.path, 
-                                                train=False, 
-                                                transform=self.get_no_transforms(), 
-                                                download=True)
-        
+        test_dataset = datasets.CIFAR10(self.cfg.dataset.content.path,
+                                        train=False,
+                                        transform=self.get_no_transforms(),
+                                        download=True)
+
         return train_dataset, valid_dataset, test_dataset
-        
 
     def get_stl10_labeled(self):
 
         train_valid_dataset = datasets.STL10(self.cfg.dataset.content.path, split='train',
-                                        transform=self.get_no_transforms(),
-                                        download=True)
+                                             transform=self.get_no_transforms(),
+                                             download=True)
 
         train_dataset, valid_dataset = self.split_train_valid_dataset(train_valid_dataset)
 
         test_dataset = datasets.STL10(self.cfg.dataset.content.path, split='test',
-                                        transform=self.get_no_transforms(),
-                                        download=True)
+                                      transform=self.get_no_transforms(),
+                                      download=True)
 
         return train_dataset, valid_dataset, test_dataset
-
 
     def get_stl10_unlabeled(self):
 
         return datasets.STL10(self.cfg.dataset.content.path, split='unlabeled',
-                                        transform=self.get_no_transforms(),
-                                        download=True)
+                              transform=self.get_no_transforms(),
+                              download=True)
 
     def get_stl10_bg(self):
         class TransparencyDataset:
-            def __init__(self, RGB, RGBA):
-                assert len(RGB) == len(RGBA)
-                self.RGB = RGB
-                self.RGBA = RGBA
-            
+            def __init__(self, rgb, rgba):
+                assert len(rgb) == len(rgba)
+                self.rgb = rgb
+                self.rgba = rgba
+
             def __len__(self):
-                return len(self.RGB)
-            
+                return len(self.rgb)
+
             def __getitem__(self, index):
-                return torch.cat([self.RGB[index][0], transforms.ToTensor()(self.RGBA[index][0])[[3], ...]], dim=0), -1
-                
+                return torch.cat([self.rgb[index][0], transforms.ToTensor()(self.rgba[index][0])[[3], ...]], dim=0), -1
 
         with open(self.cfg.dataset.content.bg_path, "rb") as fd:
-            return TransparencyDataset(
-                datasets.STL10(self.cfg.dataset.content.path, split='unlabeled', download=True, transform=self.get_no_transforms()),
-                pickle.load(fd)['unlabeled']
-            )
+            return TransparencyDataset(datasets.STL10(self.cfg.dataset.content.path,
+                                                      split='unlabeled', download=True,
+                                                      transform=self.get_no_transforms()),
+                                       pickle.load(fd)['unlabeled'])
 
     def get_imagenet(self):
 
-        train_dataset = datasets.ImageNet(self.cfg.dataset.content.path, 
-                        split='train', 
-                        transform=self.get_resize_transforms())     
+        train_dataset = datasets.ImageNet(self.cfg.dataset.content.path,
+                                          split='train',
+                                          transform=self.get_resize_transforms())
 
-        valid_dataset = datasets.ImageNet(self.cfg.dataset.content.path, 
-                        split='val', 
-                        transform=self.get_no_transforms())
+        valid_dataset = datasets.ImageNet(self.cfg.dataset.content.path,
+                                          split='val',
+                                          transform=self.get_no_transforms())
 
-        test_dataset = datasets.ImageNet(self.cfg.dataset.content.path, 
-                        split='test', 
-                        transform=self.get_no_transforms())
+        test_dataset = datasets.ImageNet(self.cfg.dataset.content.path,
+                                         split='test',
+                                         transform=self.get_no_transforms())
 
         return train_dataset, valid_dataset, test_dataset
-
 
     def get_dataset_for_linear_probe(self):
         """
         Get datasets for the linear probe. We need a training, a validation and a test dataset.
         Everything should be labeled.
         """
-        valid_datasets = {
-            'cifar10': lambda: self.get_cifar10(),
-            'stl10': lambda: self.get_stl10_labeled(),   
-            'stl10_bg': lambda: self.get_stl10_labeled(),
-            'imagenet': lambda: self.get_imagenet()
-        }
+        valid_datasets = {'cifar10': lambda: self.get_cifar10(),
+                          'stl10': lambda: self.get_stl10_labeled(),
+                          'stl10_bg': lambda: self.get_stl10_labeled(),
+                          'imagenet': lambda: self.get_imagenet()}
 
         try:
             dataset_fn = valid_datasets[self.cfg.dataset.content.name]
@@ -178,15 +169,11 @@ class ContentImageDataset:
         """
 
         if self.cfg.augment.background_remover:
-            valid_datasets = {  
-                'stl10': lambda: self.get_stl10_bg(),
-            }
-        else:            
-            valid_datasets = {
-                'cifar10': lambda: self.get_cifar10()[0],
-                'stl10': lambda: self.get_stl10_unlabeled(),   
-                'imagenet': lambda: self.get_imagenet()[0]
-            }
+            valid_datasets = {'stl10': lambda: self.get_stl10_bg()}
+        else:
+            valid_datasets = {'cifar10': lambda: self.get_cifar10()[0],
+                              'stl10': lambda: self.get_stl10_unlabeled(),
+                              'imagenet': lambda: self.get_imagenet()[0]}
 
         try:
             dataset_fn = valid_datasets[self.cfg.dataset.content.name]
@@ -235,7 +222,7 @@ class StylizedDatasetOnGPU:
 
         # get content image
         content_image = self.content_dataset[idx][0]
-        if content_image.shape[0] == 4:             # RGBA
+        if content_image.shape[0] == 4:  # RGBA
             transparancy = content_image[3, None, ...]
             content_image = content_image[:3, ...]
         else:

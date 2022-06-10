@@ -122,5 +122,5 @@ def _calc_feat_flatten_mean_std(feat):
 
 
 def _mat_sqrt(x):
-    U, D, V = torch.svd(x)
-    return torch.mm(torch.mm(U, D.pow(0.5).diag()), V.t())
+    u, d, v = torch.svd(x)
+    return torch.mm(torch.mm(u, d.pow(0.5).diag()), v.t())

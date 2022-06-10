@@ -33,7 +33,6 @@ class ResNetSimCLR(nn.Module):
         return self.backbone(x)
 
 
-
 class ResNetDownStream(nn.Module):
     def __init__(self, model_cfg):
         super(ResNetDownStream, self).__init__()
@@ -42,8 +41,6 @@ class ResNetDownStream(nn.Module):
                             "resnet50": models.resnet50(pretrained=False, num_classes=model_cfg.out_dim)}
 
         self.backbone = self._get_basemodel(model_cfg.base_model)
-
-
 
     def _get_basemodel(self, model_name):
         try:
@@ -57,25 +54,12 @@ class ResNetDownStream(nn.Module):
     def forward(self, x):
         return self.backbone(x)
 
-    
     def get_params_from_resnetsimclr(self, model: ResNetSimCLR):
 
-        model_state_dict = model.state_dict()
-        self_state_dict = self.state_dict()
-
-        # exclude the fully connected layers
-        # in resnet SIMCLR they are called backbone.fc.0.weight/bias, backbone.fc.2.weight/bias
-        # in resnet DOWNSTREAM they are called backbone.fc.weight/bias
-        # so the names do not overlap 
-        pretrained_state = { k:v for k,v in model_state_dict.items() if k in self_state_dict }
-
         self.load_state_dict(model.state_dict(), strict=False)
-
 
     def freeze_conv_params(self):
 
         for name, param in self.named_parameters():
             if name not in ['backbone.fc.weight', 'backbone.fc.bias']:
                 param.requires_grad = False
-
-
