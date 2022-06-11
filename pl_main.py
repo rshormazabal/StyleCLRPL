@@ -30,7 +30,7 @@ def main(cfg: DictConfig) -> None:
     data = StyleCLRPLDataset(cfg)
     data.setup()
 
-    # set dataloader len for schduler
+    # set dataloader len for scheduler
     cfg.dataset['len_train_loader'] = len(data.train_dataloader())
 
     # checkpoint callback, saves last model every k epochs. Better than implementing directly in the PL logic since

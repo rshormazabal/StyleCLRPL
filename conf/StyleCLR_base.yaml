@@ -2,10 +2,14 @@ model_name: StyleCLR_base                                                  # Mod
 root_path: /ROOT/                                                          # Project main root.
 seed: Seed                                                                 # Random seed in random, torch, pandas and cuda.
 gpu_ids:                                                                   # GPU ID's as list.
-    - 1
-    - 2
-    - 3
-    - 4
+    - 7
+    - 8
+    - 9
+    - 10
+    - 11
+    - 12
+    - 13
+    - 14
 train:                                                                     # PL trainer params. See PL trainer documentation.
   strategy: ddp
   precision: 32
@@ -35,10 +39,10 @@ dataset:
     name: stl10                                                            # Dataset to use (stl10/cifar10)
     path: /ROOT/datasets/stl10                                             # Content images path.
     bg_path: /ROOT/datasets/stl10/stl10_bg.pkl                             # Path to the stl10 background masking pickle
-  batch_size: 64                                                           # Main batch size.
+  batch_size: 64                                                      # Main batch size.
   num_workers: 4                                                           # Main dataloader number of workers.
   n_views: 2                                                               # Number of views to generate (currently supports 2)
-  valid_split: 0.2                                                         # Ratio of dataset used as validation when no validation set present
+  val_split: 0.2                                                         # Ratio of dataset used as validation when no validation set present
   test_split: 0.2                                                          # Ratio of dataset used as test when no test set is present.
   len_train_loader: set_at_runtime                                         # Holder for train dataloader size (used in scheduler).
 augment:

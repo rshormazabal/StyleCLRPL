@@ -3,16 +3,13 @@ from typing import Tuple
 
 import pytorch_lightning as pl
 import torch
-from nvidia.dali.pipeline import Pipeline
-from nvidia.dali.plugin.pytorch import feed_ndarray
-from omegaconf import DictConfig
 from pytorch_lightning.utilities.types import STEP_OUTPUT, EPOCH_OUTPUT
 from torch.nn import functional as F, Sequential
 from torch.utils.data import DataLoader
 
-
 from flash.core.optimizers import LARS
 
+from pl_bolts.optimizers.lr_scheduler import LinearWarmupCosineAnnealingLR
 from dataset import ContentImageDataset
 from omegaconf import DictConfig
 from data_aug.adain import vgg, decoder
@@ -60,10 +57,10 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         # linear predictor
         ##
 
-        train_data, valid_data, _ = ContentImageDataset(self.cfg).get_dataset_for_linear_probe()
+        train_data, val_data, _ = ContentImageDataset(self.cfg).get_dataset_for_linear_probe()
 
         self.probe_train_dataloader = DataLoader(train_data,
-                                                 batch_size=512,
+                                                 batch_size=self.cfg.probe.batch_size,
                                                  shuffle=True,
                                                  num_workers=self.cfg.dataset.num_workers,
                                                  pin_memory=True,
@@ -153,9 +150,9 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         is_last_epoch = self.current_epoch == self.cfg.train.max_epochs - 1
 
         if self.current_epoch % self.cfg.probe.run_every_n_epoch == 0 or is_last_epoch:
-            
-            result = self.run_linear_predictor(is_last_epoch)            
-            self.log_dict(result, on_epoch=True, prog_bar=True, sync_dist=True)
+            if self.global_rank == 0:
+                result = self.run_linear_predictor(is_last_epoch)
+                self.log_dict(result, on_epoch=True, prog_bar=True, sync_dist=True)
 
     
     def run_linear_predictor(self, is_last_epoch):
@@ -202,7 +199,7 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         # select and combine multiple positives
         positives = similarity_matrix[labels.bool()].view(labels.shape[0], -1)
 
-        # select only the negatives the negatives
+        # select only the negatives
         negatives = similarity_matrix[~labels.bool()].view(similarity_matrix.shape[0], -1)
 
         # concatenate logits and divide by temperature parameters
@@ -219,10 +216,8 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         :return:
         """
 
-        optim_dict = {
-            "LARS": LARS,
-            "Adam": torch.optim.Adam
-        }
+        optim_dict = {"LARS": LARS,
+                      "Adam": torch.optim.Adam}
 
         optim_name = optim_dict[self.cfg.optimizer.name]
 
@@ -230,13 +225,9 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
                             self.cfg.optimizer.lr,
                             weight_decay=self.cfg.optimizer.weight_decay)
 
-        if self.cfg.optimizer.use_cosine_annealing:
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
-                                                               T_max=self.cfg.dataset.len_train_loader,
-                                                               eta_min=0,
-                                                               last_epoch=-1)
-        else:
-            scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size = 1, gamma = 1)
+        scheduler = LinearWarmupCosineAnnealingLR(optimizer,
+                                                  warmup_epochs=self.cfg.scheduler.warmup_epochs,
+                                                  max_epochs=self.cfg.train.max_epochs)
 
         return [optimizer] , [{"scheduler": scheduler}]
 
@@ -253,9 +244,7 @@ class ClassificationModel(pl.LightningModule, ABC):
         self.cfg = cfg
 
         # Downstream Classification Model
-        self.model = ResNetDownStream(model_cfg=self.cfg.model)
-        
-        self.dali = dali(self.cfg, do_crop = True, do_color = False, do_blur = False)
+        self.model = ResNetDownStream(cfg=self.cfg)
 
     def forward(self, images: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         """
@@ -276,9 +265,6 @@ class ClassificationModel(pl.LightningModule, ABC):
         """
       
         content_images, labels = batch
-
-        # Cropping and flipping
-        content_images = self.dali(content_images)
 
         features = self.model(content_images)
         loss = torch.nn.CrossEntropyLoss()(features, labels)
@@ -339,8 +325,9 @@ class ClassificationModel(pl.LightningModule, ABC):
                                      self.cfg.optimizer.lr,
                                      weight_decay=self.cfg.optimizer.weight_decay),
                     "Nesterov": torch.optim.SGD(self.model.parameters(),
+                                                momentum=0.9,
                                                 nesterov = True,
-                                                lr = self.cfg.probe.lr)}
+                                                lr = self.cfg.dataset.batch_size/256 * 0.05)}
 
         optimizer = opt_dict[self.cfg.probe.optimizer_name]
 
