@@ -61,3 +61,10 @@ coverage.xml
 
 # Sphinx documentation
 docs/_build/
+/__pycache__
+/*/__pycache__
+/outputs
+*.jpg
+/datasets
+/model_checkpoints
+/data/*.pkl

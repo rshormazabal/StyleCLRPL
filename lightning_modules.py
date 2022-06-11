@@ -1,12 +1,15 @@
 from abc import ABC
-from inspect import classify_class_attrs
-
 from typing import Tuple
 
 import pytorch_lightning as pl
 import torch
+from nvidia.dali.pipeline import Pipeline
+from nvidia.dali.plugin.pytorch import feed_ndarray
+from omegaconf import DictConfig
 from pytorch_lightning.utilities.types import STEP_OUTPUT, EPOCH_OUTPUT
 from torch.nn import functional as F, Sequential
+from torch.utils.data import DataLoader
+
 
 from flash.core.optimizers import LARS
 
@@ -14,6 +17,7 @@ from dataset import ContentImageDataset
 from omegaconf import DictConfig
 from data_aug.adain import vgg, decoder
 from data_aug.transforms import adain, background, dali
+
 from models.resnet_simclr import ResNetSimCLR, ResNetDownStream
 from utils import accuracy
 
@@ -58,20 +62,19 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
 
         train_data, valid_data, _ = ContentImageDataset(self.cfg).get_dataset_for_linear_probe()
 
-        self.probe_train_dataloader = torch.utils.data.DataLoader(train_data,
-                        batch_size=self.cfg.dataset.batch_size,
-                        shuffle=True,
-                        num_workers=self.cfg.dataset.num_workers,
-                        pin_memory=True,
-                        drop_last=True)
+        self.probe_train_dataloader = DataLoader(train_data,
+                                                 batch_size=512,
+                                                 shuffle=True,
+                                                 num_workers=self.cfg.dataset.num_workers,
+                                                 pin_memory=True,
+                                                 drop_last=True)
 
-        self.probe_valid_dataloader = torch.utils.data.DataLoader(valid_data,
-                        batch_size=self.cfg.dataset.batch_size,
-                        shuffle=False,
-                        num_workers=self.cfg.dataset.num_workers,
-                        pin_memory=True,
-                        drop_last=True)
-
+        self.probe_val_dataloader = DataLoader(val_data,
+                                               batch_size=128,
+                                               shuffle=False,
+                                               num_workers=self.cfg.dataset.num_workers,
+                                               pin_memory=True,
+                                               drop_last=True)
 
     def forward(self, images: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         """
@@ -82,7 +85,6 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         :return:
         """
         return self.model(images)
-
 
     def training_step(self, batch: list) -> STEP_OUTPUT:
         """
@@ -112,7 +114,6 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         if self.cfg.augment.crop or self.cfg.augment.color or self.cfg.augment.blur:
             styled_images = self.dali(styled_images)
 
-
         # augmented views contrastive setup
         features = self.model(styled_images)
         logits, labels = self.info_nce_loss(features)
@@ -126,10 +127,6 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
                 'nce/top1': top1[0].detach(),
                 'nce/top5': top5[0].detach()}
 
-
-    
-
-
     def training_step_end(self, step_outputs: STEP_OUTPUT) -> STEP_OUTPUT:
         """
         Called right after training step. Useful for NCE-loss if using dp/ddp2 since batches are split across GPUS.
@@ -138,7 +135,6 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         :return:
         """
         return step_outputs
-
 
     def training_epoch_end(self, outputs: EPOCH_OUTPUT):
         """
@@ -169,22 +165,19 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         else:
             epochs = self.cfg.probe.epochs
 
-        trainer = pl.Trainer(gpus=self.cfg.gpu_ids,
-            strategy=self.cfg.train.strategy,
-            precision=self.cfg.train.precision,
-            log_every_n_steps=1,
-            check_val_every_n_epoch=0,
-            amp_backend=self.cfg.train.amp_backend,
-            max_epochs=epochs,
-        )
+        trainer = pl.Trainer(gpus=self.cfg.probe.gpu_id,
+                             strategy=None,
+                             precision=self.cfg.train.precision,
+                             log_every_n_steps=1,
+                             amp_backend='native',
+                             max_epochs=epochs)
 
         downstream_model = ClassificationModel(self.cfg)
         downstream_model.model.get_params_from_resnetsimclr(self.model)
         downstream_model.model.freeze_conv_params()
-        
-        trainer.fit(downstream_model, self.probe_train_dataloader)
-        return trainer.validate(downstream_model, self.probe_valid_dataloader)[0]
 
+        trainer.fit(downstream_model, self.probe_train_dataloader)
+        return trainer.validate(downstream_model, self.probe_val_dataloader)[0]
 
     def info_nce_loss(self, features: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -219,7 +212,6 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         logits = logits / self.cfg.model.temperature
         return logits, labels
 
-
     def configure_optimizers(self):
         """
         Choose optimizers, schedulers and learning-rate schedulers to use. Automatically called by PL.
@@ -249,9 +241,6 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         return [optimizer] , [{"scheduler": scheduler}]
 
 
-
-
-
 class ClassificationModel(pl.LightningModule, ABC):
 
     def __init__(self, cfg: DictConfig):
@@ -262,12 +251,11 @@ class ClassificationModel(pl.LightningModule, ABC):
         super().__init__()
         # config files
         self.cfg = cfg
-        
+
         # Downstream Classification Model
         self.model = ResNetDownStream(model_cfg=self.cfg.model)
-
+        
         self.dali = dali(self.cfg, do_crop = True, do_color = False, do_blur = False)
-
 
     def forward(self, images: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         """
@@ -278,7 +266,6 @@ class ClassificationModel(pl.LightningModule, ABC):
         :return:
         """
         return self.model(images)
-
 
     def training_step(self, batch: list) -> STEP_OUTPUT:
         """
@@ -304,9 +291,6 @@ class ClassificationModel(pl.LightningModule, ABC):
                 'trn/top1': top1[0].detach(),
                 'trn/top5': top5[0].detach()}
 
-
-
-
     def training_epoch_end(self, outputs: EPOCH_OUTPUT):
         """
         Called at the end of the training epoch with the outputs of all training steps as a list.
@@ -321,20 +305,15 @@ class ClassificationModel(pl.LightningModule, ABC):
         self.log("trn/top1", top1_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
         self.log("trn/top5", top5_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
 
-
     def validation_step(self, batch: list, batch_idx) -> STEP_OUTPUT:
-
         content_images, labels = batch
 
         features = self.model(content_images)
 
         # get top 1 and top 5 accuracies
         top1, top5 = accuracy(features, labels, topk=(1, 5))
-        return {
-            'acc/top1': top1, 
-            'acc/top5': top5
-        }
-
+        return {'acc/top1': top1,
+                'acc/top5': top5}
 
     def validation_epoch_end(self, outputs: EPOCH_OUTPUT):
         """
@@ -349,7 +328,6 @@ class ClassificationModel(pl.LightningModule, ABC):
         # get mean across all batches
         self.log("acc/top1", top1_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
         self.log("acc/top5", top5_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
-        
 
     def configure_optimizers(self):
         """
@@ -357,16 +335,12 @@ class ClassificationModel(pl.LightningModule, ABC):
         See PL documentation.
         :return:
         """
-
-        opt_dict = {
-            "Adam": torch.optim.Adam(self.model.parameters(),
+        opt_dict = {"Adam": torch.optim.Adam(self.model.parameters(),
                                      self.cfg.optimizer.lr,
                                      weight_decay=self.cfg.optimizer.weight_decay),
-            "Nesterov": torch.optim.SGD(self.model.parameters(),
-                                    momentum = 0.9,
-                                    nesterov = True,
-                                    lr = self.cfg.probe.lr)
-        }
+                    "Nesterov": torch.optim.SGD(self.model.parameters(),
+                                                nesterov = True,
+                                                lr = self.cfg.probe.lr)}
 
         optimizer = opt_dict[self.cfg.probe.optimizer_name]
 

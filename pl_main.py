@@ -5,7 +5,7 @@ import hydra
 import pytorch_lightning as pl
 import torch
 from omegaconf import DictConfig
-from pytorch_lightning.callbacks import ModelSummary, LearningRateMonitor, ModelCheckpoint
+from pytorch_lightning.callbacks import ModelSummary, LearningRateMonitor
 from torch.utils.data import DataLoader
 from torchvision.transforms import transforms
 from tqdm import tqdm
@@ -16,7 +16,7 @@ from lightning_modules import StyleCLRPLModel
 from utils import LastEpochCheckpoint
 
 
-@hydra.main(config_path="conf", config_name="StyleCLR_base")
+@hydra.main(config_path="conf", config_name="StyleCLR_test")
 def main(cfg: DictConfig) -> None:
     """
     Main training class. All parameters are defined in the yaml Hydra configuration.
