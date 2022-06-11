@@ -14,10 +14,13 @@ train:                                                                     # PL 
 probe:
   run_every_n_epoch: 1
   epochs: 10
+  lr: 0.01
+  optimizer_name: "Nesterov"                                                # (Nestorov/Adam)
 model:
   base_model: resnet50                                                     # Backbone model for SimCLR.
+  smaller_base: False                                                       # Decrease the size of the first convolution layer (cifar10)
   out_dim: 128                                                             # SimCLR output dimension.
-  temperature: 0.07                                                        # InfoNCE temperature parameters.
+  temperature: 0.1                                                         # InfoNCE temperature parameters.
   style_alpha: 0.8                                                         # AdaIn alpha (higher -> stronger style).
   style_vgg_path: /home/felix/StyleCLRPL/data/pretrained_models_adain/vgg_normalised.pth    # Style transfer VGG backbone network pretrained weights' path.
   style_decoder_path: /home/felix/StyleCLRPL/data/pretrained_models_adain/decoder.pth       # Style transfer decoder network pretrained weights' path.
@@ -32,7 +35,7 @@ dataset:
     device: 6                                                               # Device to calculate preprocessed style embeddings.
   content:
     name: stl10                                                        # Dataset to use (stl10/cifar10)
-    path: /home/felix/StyleCLRPL/datasets/stl10                            # Content images path.
+    path: /home/felix/StyleCLRPL/datasets/stl10                          # Content images path.
     bg_path: /home/felix/StyleCLRPL/datasets/stl10/stl10_bg.pkl             # Path to the stl10 background masking pickle
   batch_size: 64                                                     # Main batch size.
   num_workers: 4                                                           # Main dataloader number of workers.
@@ -41,15 +44,17 @@ dataset:
   test_split: 0.2                                                         # Ratio of dataset used as test when no test set is present.
   len_train_loader: set_at_runtime                                         # Holder for train dataloader size (used in scheduler).
 augment:
-  adain: False                                                            # Whether to apply adain as data augmentation
-  background_remover: False                                               # Whether to remove the background as data augmentation
+  adain: True                                                            # Whether to apply adain as data augmentation
+  background_replacer: True                                               # Whether to remove the background as data augmentation
   size: 96                                                               # random crop and resize to this size
   crop: True                                                             # Whether to add random crop, resize and flip in data augmentation 
-  color: True                                                           # Whether to add color distortion and color drop in data augmentation
-  blur: True                                                          # Whether to add gaussain blur in data augmentation
+  color: False                                                           # Whether to add color distortion and color drop in data augmentation
+  blur: False                                                          # Whether to add gaussain blur in data augmentation
 optimizer:
+  name: "Adam"                                                          # (Adam/LARS)
   lr: 0.0003                                                               # Main Learning rate.
-  weight_decay: 0.0001                                                     # Weight decay.
+  weight_decay: 0.0001                                                        # Weight decay.
+  use_cosine_annealing: False                                              # Cosine Annealing scheduler or none at all
 logger:
   project_name: example/StyleCLR                                           # Logger name for neptune.
   tags:

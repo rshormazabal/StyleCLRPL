@@ -177,7 +177,7 @@ class ContentImageDataset:
         Returns one dataset
         """
 
-        if self.cfg.augment.background_remover:
+        if self.cfg.augment.background_replacer:
             valid_datasets = {  
                 'stl10': lambda: self.get_stl10_bg(),
             }
