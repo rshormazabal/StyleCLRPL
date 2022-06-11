@@ -75,7 +75,7 @@ def dali(cfg, do_crop, do_color, do_blur):
         
         augmented_images = torch.zeros(images.shape(), dtype=torch.uint8).cuda()
         feed_ndarray(images, augmented_images)
-        augmented_images = augmented_images.permute(0,3,1,2).type(input_dtype)/225.
+        augmented_images = augmented_images.permute(0,3,1,2).type(input_dtype)/255.
         c=augmented_images.shape[1]
         if c==1:
             augmented_images = augmented_images.repeat(1,3,1,1)
