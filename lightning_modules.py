@@ -160,7 +160,7 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
 
         styled_augmented_images = torch.zeros(styled_image.shape(), dtype=torch.uint8).cuda()
         feed_ndarray(styled_image, styled_augmented_images)
-        styled_augmented_images = styled_augmented_images.permute(0, 3, 1, 2).type(styled_images.dtype) / 225.
+        styled_augmented_images = styled_augmented_images.permute(0, 3, 1, 2).type(styled_images.dtype) / 255.
         c = styled_augmented_images.shape[1]
         if c == 1:
             styled_augmented_images = styled_augmented_images.repeat(1, 3, 1, 1)
