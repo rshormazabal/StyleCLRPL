@@ -13,7 +13,7 @@ train:                                                                     # PL 
   enable_checkpointing: True
 model:
   base_model: resnet50                                                     # Backbone model for SimCLR.
-  smaller_base: False                                                       # Decrease the size of the first convolution layer (cifar10)
+  smaller_base: True                                                       # Decrease the size of the first convolution layer (cifar10)
   out_dim: 128                                                             # SimCLR output dimension.
   temperature: 0.1                                                         # InfoNCE temperature parameters.
   style_alpha: 0.8                                                         # AdaIn alpha (higher -> stronger style).
@@ -32,7 +32,7 @@ dataset:
     name: cifar10                                                       # Dataset to use (stl10/cifar10)
     path: /home/felix/StyleCLRPL/datasets/cifar10                          # Content images path.
     bg_path: /home/felix/StyleCLRPL/datasets/stl10/stl10_bg.pkl             # Path to the stl10 background masking pickle
-  batch_size: 128                                                     # Main batch size.
+  batch_size: 64                                                     # Main batch size.
   num_workers: 4                                                           # Main dataloader number of workers.
   n_views: 2                                                              # Number of views to generate (currently supports 2)
   valid_split: 0.2                                                      # Ratio of dataset used as validation when no validation set present
@@ -41,7 +41,7 @@ dataset:
 augment:
   adain: False                                                            # Whether to apply adain as data augmentation
   background_replacer: False                                               # Whether to remove the background as data augmentation
-  size: 96                                                               # random crop and resize to this size
+  size: 32                                                               # random crop and resize to this size
   crop: True                                                             # Whether to add random crop, resize and flip in data augmentation 
   color: True                                                           # Whether to add color distortion and color drop in data augmentation
   blur: False                                                          # Whether to add gaussain blur in data augmentation
@@ -49,7 +49,7 @@ optimizer:
   name: "Adam"                                                          # (Adam/LARS)
   lr: 0.0003                                                               # Main Learning rate.
   weight_decay: 0.0001                                                        # Weight decay.
-  use_cosine_annealing: False                                              # Cosine Annealing scheduler or none at all
+  use_cosine_annealing: True                                              # Cosine Annealing scheduler or none at all
 probe:                                                                    # The linear probe that gives us the classification performance
   run_every_n_epoch: 1
   epochs: 1

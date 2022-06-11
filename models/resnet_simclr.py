@@ -50,7 +50,7 @@ class ResNetDownStream(nn.Module):
         self.backbone = self._get_basemodel(model_cfg.base_model)
 
         if model_cfg.smaller_base:
-            self.backbone.conv1 = nn.Conv2d(3, 64, kernel_size=(5, 5), stride=(2, 2), padding=(2, 2), bias=False)
+            self.backbone.conv1 = nn.Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(2, 2), bias=False)
             self.backbone.maxpool = nn.Identity()
 
 
