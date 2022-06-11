@@ -15,6 +15,12 @@ class ResNetSimCLR(nn.Module):
                             "resnet50": models.resnet50(pretrained=False, num_classes=model_cfg.out_dim)}
 
         self.backbone = self._get_basemodel(model_cfg.base_model)
+
+        if model_cfg.smaller_base:
+            # See simclr paper about cifar-10 decrease in size
+            self.backbone.conv1 = nn.Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+            self.backbone.maxpool = nn.Identity()
+
         dim_mlp = self.backbone.fc.in_features
 
         # add mlp projection head
@@ -41,6 +47,10 @@ class ResNetDownStream(nn.Module):
                             "resnet50": models.resnet50(pretrained=False, num_classes=model_cfg.out_dim)}
 
         self.backbone = self._get_basemodel(model_cfg.base_model)
+
+        if model_cfg.smaller_base:
+            self.backbone.conv1 = nn.Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(2, 2), bias=False)
+            self.backbone.maxpool = nn.Identity()
 
     def _get_basemodel(self, model_name):
         try:

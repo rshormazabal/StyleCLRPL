@@ -184,14 +184,16 @@ class ContentImageDataset:
         Get datasets for the simclr. We only need the training dataset, and unlabeled is fine.
         Returns one dataset
         """
-
-        if self.cfg.augment.background_remover:
-            val_datasets = {'stl10': lambda: self.get_stl10_bg()}
-        else:
-            val_datasets = {'cifar10': lambda: self.get_cifar10()[0],
-                            'stl10': lambda: self.get_stl10_unlabeled(),
-                            'imagenet': lambda: self.get_imagenet()[0]}
-
+        if self.cfg.augment.background_replacer:
+            valid_datasets = {  
+                'stl10': lambda: self.get_stl10_bg(),
+            }
+        else:            
+            valid_datasets = {
+                'cifar10': lambda: self.get_cifar10()[0],
+                'stl10': lambda: self.get_stl10_unlabeled(),   
+                'imagenet': lambda: self.get_imagenet()[0]
+            }
         try:
             dataset_fn = val_datasets[self.cfg.dataset.content.name]
         except KeyError:

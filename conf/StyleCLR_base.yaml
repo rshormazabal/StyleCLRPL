@@ -14,13 +14,11 @@ train:                                                                     # PL 
   check_val_every_n_epoch: 0
   amp_backend: native
   enable_checkpointing: True
-probe:
-  run_every_n_epoch: 1
-  epochs: 10
 model:
   base_model: resnet50                                                     # Backbone model for SimCLR.
+  smaller_base: True                                                       # Decrease the size of the first convolution layer (cifar10)
   out_dim: 128                                                             # SimCLR output dimension.
-  temperature: 0.07                                                        # InfoNCE temperature parameters.
+  temperature: 0.1                                                         # InfoNCE temperature parameters.
   style_alpha: 0.8                                                         # AdaIn alpha (higher -> stronger style).
   style_vgg_path: /ROOT/data/pretrained_models_adain/vgg_normalised.pth    # Style transfer VGG backbone network pretrained weights' path.
   style_decoder_path: /ROOT/data/pretrained_models_adain/decoder.pth       # Style transfer decoder network pretrained weights' path.
@@ -44,15 +42,25 @@ dataset:
   test_split: 0.2                                                          # Ratio of dataset used as test when no test set is present.
   len_train_loader: set_at_runtime                                         # Holder for train dataloader size (used in scheduler).
 augment:
-  adain: False                                                            # Whether to apply adain as data augmentation
-  background_remover: False                                               # Whether to remove the background as data augmentation
-  size: 96                                                                # random crop and resize to this size
-  crop: True                                                              # Whether to add random crop, resize and flip in data augmentation
-  color: True                                                             # Whether to add color distortion and color drop in data augmentation
-  blur: True                                                              # Whether to add gaussain blur in data augmentation
+  adain: False                                                             # Whether to apply adain as data augmentation
+  background_replacer: False                                               # Whether to remove the background as data augmentation
+  size: 32                                                                 # random crop and resize to this size
+  crop: True                                                               # Whether to add random crop, resize and flip in data augmentation 
+  color: True                                                              # Whether to add color distortion and color drop in data augmentation
+  blur: False                                                              # Whether to add gaussain blur in data augmentation
 optimizer:
+  name: "Adam"                                                             # (Adam/LARS)
   lr: 0.0003                                                               # Main Learning rate.
   weight_decay: 0.0001                                                     # Weight decay.
+  use_cosine_annealing: True                                               # Cosine Annealing scheduler or none at all
+probe:                                                                     # The linear probe that gives us the classification performance
+  gpu_id: 8                                                 
+  run_every_n_epoch: 1
+  epochs: 1
+  last_run_epochs : 100                                                    # Number of epochs to run for linear probe on the last validation
+  lr: 0.01
+  optimizer_name: "Nesterov"                                               # (Nestorov/Adam)
+  crop_and_flip: true
 logger:
   project_name: example/StyleCLR                                           # Logger name for neptune.
   tags:
