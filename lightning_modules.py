@@ -154,12 +154,20 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         self.log("nce/top1", top1_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
         self.log("nce/top5", top5_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
 
-        if self.current_epoch % self.cfg.probe.run_every_n_epoch == 0:
-            result = self.run_linear_predictor()            
+        is_last_epoch = self.current_epoch == self.cfg.train.max_epochs - 1
+
+        if self.current_epoch % self.cfg.probe.run_every_n_epoch == 0 or is_last_epoch:
+            
+            result = self.run_linear_predictor(is_last_epoch)            
             self.log_dict(result, on_epoch=True, prog_bar=True, sync_dist=True)
 
     
-    def run_linear_predictor(self):
+    def run_linear_predictor(self, is_last_epoch):
+
+        if is_last_epoch:
+            epochs = self.cfg.probe.last_run_epochs
+        else:
+            epochs = self.cfg.probe.epochs
 
         trainer = pl.Trainer(gpus=self.cfg.gpu_ids,
             strategy=self.cfg.train.strategy,
@@ -167,7 +175,7 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
             log_every_n_steps=1,
             check_val_every_n_epoch=0,
             amp_backend=self.cfg.train.amp_backend,
-            max_epochs=self.cfg.probe.epochs,
+            max_epochs=epochs,
         )
 
         downstream_model = ClassificationModel(self.cfg)
