@@ -1,6 +1,6 @@
 model_name: StyleCLR_base                                                  # Model name for loggin (neptune).
 root_path: /ROOT/                                                          # Project main root.
-seed: Seed                                                                 # Random seed in random, torch, pandas and cuda.
+seed: 10                                                                 # Random seed in random, torch, pandas and cuda.
 gpu_ids:                                                                   # GPU ID's as list.
     - 7
     - 8
@@ -11,7 +11,7 @@ gpu_ids:                                                                   # GPU
     - 13
     - 14
 train:                                                                     # PL trainer params. See PL trainer documentation.
-  strategy: ddp
+  strategy: null
   precision: 32
   max_epochs: 100
   log_every_n_steps: 4
@@ -22,7 +22,7 @@ model:
   base_model: resnet50                                                     # Backbone model for SimCLR.
   smaller_base: True                                                       # Decrease the size of the first convolution layer (cifar10)
   out_dim: 128                                                             # SimCLR output dimension.
-  temperature: 0.1                                                         # InfoNCE temperature parameters.
+  temperature: 0.5                                                         # InfoNCE temperature parameters.
   style_alpha: 0.8                                                         # AdaIn alpha (higher -> stronger style).
   style_vgg_path: /ROOT/data/pretrained_models_adain/vgg_normalised.pth    # Style transfer VGG backbone network pretrained weights' path.
   style_decoder_path: /ROOT/data/pretrained_models_adain/decoder.pth       # Style transfer decoder network pretrained weights' path.
@@ -36,10 +36,10 @@ dataset:
     image_size: 96                                                         # Style image warp size (square).
     device: 6                                                              # Device to calculate preprocessed style embeddings.
   content:
-    name: stl10                                                            # Dataset to use (stl10/cifar10)
+    name: cifar10                                                            # Dataset to use (stl10/cifar10)
     path: /ROOT/datasets/stl10                                             # Content images path.
     bg_path: /ROOT/datasets/stl10/stl10_bg.pkl                             # Path to the stl10 background masking pickle
-  batch_size: 64                                                      # Main batch size.
+  batch_size: 512                                                           # Main batch size.
   num_workers: 4                                                           # Main dataloader number of workers.
   n_views: 2                                                               # Number of views to generate (currently supports 2)
   val_split: 0.2                                                         # Ratio of dataset used as validation when no validation set present
@@ -49,22 +49,26 @@ augment:
   adain: False                                                             # Whether to apply adain as data augmentation
   background_replacer: False                                               # Whether to remove the background as data augmentation
   size: 32                                                                 # random crop and resize to this size
-  crop: True                                                               # Whether to add random crop, resize and flip in data augmentation 
+  crop: True                                                               # Whether to add random crop, resize and flip in data augmentation
   color: True                                                              # Whether to add color distortion and color drop in data augmentation
-  blur: False                                                              # Whether to add gaussain blur in data augmentation
+  blur: True                                                              # Whether to add gaussain blur in data augmentation
 optimizer:
-  name: "Adam"                                                             # (Adam/LARS)
-  lr: 0.0003                                                               # Main Learning rate.
-  weight_decay: 0.0001                                                     # Weight decay.
-  use_cosine_annealing: True                                               # Cosine Annealing scheduler or none at all
-probe:                                                                     # The linear probe that gives us the classification performance
-  gpu_id: 8                                                 
-  run_every_n_epoch: 1
-  epochs: 1
-  last_run_epochs : 100                                                    # Number of epochs to run for linear probe on the last validation
+  name: LARS                                                               # (Adam/LARS)
+  lr: 0.6                                                                  # Main Learning rate. (0.3 * batch_size/256)
+  weight_decay: 0.000001                                                   # Weight decay.
+scheduler:
+  warmup_epochs: 10
+probe:
+  gpu_id:
+    - 15
+  run_every_n_epoch: 10
+  epochs: 500
+  last_run_epochs : 90                                                     # Number of epochs to run for linear probe on the last validation
   lr: 0.01
-  optimizer_name: "Nesterov"                                               # (Nestorov/Adam)
+  optimizer_name: Nesterov                                                 # (Nestorov/Adam)
   crop_and_flip: true
+  batch_size: 512
+  num_classes: 10
 logger:
   project_name: example/StyleCLR                                           # Logger name for neptune.
   tags:
