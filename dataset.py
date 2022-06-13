@@ -48,7 +48,7 @@ class StyleCLRPLDataset(pl.LightningDataModule, ABC):
                                            num_workers=self.cfg.dataset.num_workers,
                                            pin_memory=True,
                                            drop_last=True,
-                                           persistent_workers=True)
+                                           persistent_workers=True if self.cfg.dataset.num_workers > 0 else False)
 
 
 class LinearProbeDataset(pl.LightningDataModule, ABC):

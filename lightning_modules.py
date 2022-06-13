@@ -78,12 +78,23 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
             styled_images = content_images
 
         # import matplotlib.pyplot as plt
-        # f, axarr = plt.subplots(2, 2)
-        # axarr[0, 0].imshow(content_images[2].permute(1, 2, 0).detach().cpu().numpy())
-        # axarr[0, 1].imshow(styled_images[2].permute(1, 2, 0).detach().cpu().numpy())
-        # axarr[1, 0].imshow(content_images[3].permute(1, 2, 0).detach().cpu().numpy())
-        # axarr[1, 1].imshow(styled_images[3].permute(1, 2, 0).detach().cpu().numpy())
+        # from mpl_toolkits.axes_grid1 import ImageGrid
+        # import numpy as np
+        #
+        # examples = torch.cat([content_images[0].unsqueeze(0) for _ in range(36)])
+        # styled_examples = self.dali_augmentation(examples).permute(0, 2, 3, 1).detach().cpu().numpy()
+        #
+        # fig = plt.figure(figsize=(6., 6.))
+        # grid = ImageGrid(fig, 111,  # similar to subplot(111)
+        #                  nrows_ncols=(6, 6),  # creates 2x2 grid of axes
+        #                  axes_pad=0.1)  # pad between axes in inch.
+        #
+        # for ax, im in zip(grid, styled_examples):
+        #     # Iterating over the grid returns the Axes.
+        #     ax.imshow(im)
+        #
         # plt.show()
+
         # content_images = torch.cat([content_images for _ in range(2)], dim=0)
         # style_feats = torch.cat([style_feats1, style_feats2], dim=0)
         #
