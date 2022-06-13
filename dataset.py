@@ -47,7 +47,8 @@ class StyleCLRPLDataset(pl.LightningDataModule, ABC):
                                            shuffle=True,
                                            num_workers=self.cfg.dataset.num_workers,
                                            pin_memory=True,
-                                           drop_last=True)
+                                           drop_last=True,
+                                           persistent_workers=True)
 
 
 class LinearProbeDataset(pl.LightningDataModule, ABC):
@@ -140,7 +141,7 @@ class ContentImageDataset:
     def get_cifar10_simclr(self):
         train_dataset = datasets.CIFAR10(self.cfg.dataset.content.path,
                                          train=True,
-                                         transform=TransformsSimCLR(size=self.cfg.augment.size))
+                                         transform=self.get_no_transforms())
 
         return train_dataset
 
@@ -216,7 +217,7 @@ class StylizedDatasetOnGPU:
         :param style_data_path: Style metadata and images main path. [str]
         :param style_pickle_filename: Precalculated features pickle filename. [str]
         """
-        cfg = self.cfg
+        self.cfg = cfg
         self.content_dataset = content_dataset
 
         # TODO: abstract this values to config file

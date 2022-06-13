@@ -9,8 +9,12 @@ from pl_bolts.optimizers.lr_scheduler import LinearWarmupCosineAnnealingLR
 from pytorch_lightning.utilities.types import STEP_OUTPUT, EPOCH_OUTPUT
 from torch.nn import functional as F, Sequential
 
+from nvidia.dali.plugin.pytorch import feed_ndarray
+import nvidia.dali.fn as fn
+import nvidia.dali.types as types
+from nvidia.dali import pipeline_def
 from data_aug.adain import vgg, decoder
-from data_aug.transforms import adain, background
+from data_aug.transforms import adain, background, dali_augmentation, ExternalInputGPUIterator
 from models.resnet_simclr import ResNetSimCLR, ResNetDownStream
 from utils import accuracy
 
@@ -45,8 +49,7 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         self.style_vgg = self.style_vgg.eval()
         self.style_decoder = self.style_decoder.eval()
 
-        self.adain = adain(self.style_vgg, self.style_decoder, self.alpha)
-        self.background = background()
+        # self.adain = adain(self.style_vgg, self.style_decoder, self.alpha)
 
     def forward(self, images: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         """
@@ -67,9 +70,20 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         """
         # get content images and create two views
         # content_images, transparency, style_feats1, style_feats2 = batch[0]
-        aug_1, aug_2 = batch[0]
-        styled_images = torch.cat([aug_1, aug_2], dim=0)
+        content_images = torch.cat([batch[0], batch[0]], dim=0)
 
+        if self.cfg.augment.crop or self.cfg.augment.color or self.cfg.augment.blur:
+            styled_images = self.dali_augmentation(content_images)
+        else:
+            styled_images = content_images
+
+        # import matplotlib.pyplot as plt
+        # f, axarr = plt.subplots(2, 2)
+        # axarr[0, 0].imshow(content_images[2].permute(1, 2, 0).detach().cpu().numpy())
+        # axarr[0, 1].imshow(styled_images[2].permute(1, 2, 0).detach().cpu().numpy())
+        # axarr[1, 0].imshow(content_images[3].permute(1, 2, 0).detach().cpu().numpy())
+        # axarr[1, 1].imshow(styled_images[3].permute(1, 2, 0).detach().cpu().numpy())
+        # plt.show()
         # content_images = torch.cat([content_images for _ in range(2)], dim=0)
         # style_feats = torch.cat([style_feats1, style_feats2], dim=0)
         #
@@ -116,7 +130,6 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         # get mean across all batches
         self.log("nce/top1", top1_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
         self.log("nce/top5", top5_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
-
 
     def info_nce_loss(self, features: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -172,6 +185,37 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
                                                   max_epochs=self.cfg.train.max_epochs)
 
         return [optimizer], [{"scheduler": scheduler}]
+
+    @pipeline_def
+    def augment_pipeline(self, cuda_images):
+        images = fn.external_source(source=cuda_images, device='gpu', batch=True, cuda_stream=0, dtype=types.UINT8)
+        images = fn.random_resized_crop(images, size=self.cfg.augment.size) if self.cfg.augment.crop else images
+        images = fn.flip(images, horizontal=1, vertical=0) if torch.rand(1) < 0.5 and self.cfg.augment.crop else images
+        b, c, s = torch.distributions.uniform.Uniform(1 - 0.8, 1 + 0.8).sample([3, ])
+        h = torch.distributions.uniform.Uniform(-0.2, 0.2).sample([1, ])
+        images = fn.color_twist(images, brightness=b, contrast=c, saturation=s, hue=h) if torch.rand(1) < 0.8 and self.cfg.augment.color else images  # only accept hwc
+        images = fn.color_space_conversion(images, image_type=types.RGB, output_type=types.GRAY) if torch.rand(1) < 0.2 and self.cfg.augment.color else images  # only accept hwc, uint8
+        images = fn.gaussian_blur(images, window_size=int(0.1 * self.cfg.augment.size)) if self.cfg.augment.blur else images
+        return images
+
+    def dali_augmentation(self, images):
+        input_dtype = images.dtype
+
+        eii = ExternalInputGPUIterator(images)
+        augment = self.augment_pipeline(eii, batch_size=self.cfg.dataset.batch_size * 2, num_threads=8, device_id=self.local_rank)
+        augment.build()
+        images = augment.run()
+
+        images = images[0].as_tensor()  # type : TensorGPU
+
+        augmented_images = torch.zeros(images.shape(), dtype=torch.uint8).cuda()
+        feed_ndarray(images, augmented_images)
+        augmented_images = augmented_images.permute(0, 3, 1, 2).type(input_dtype) / 255.
+        c = augmented_images.shape[1]
+        if c == 1:
+            augmented_images = augmented_images.repeat(1, 3, 1, 1)
+
+        return augmented_images
 
 
 class ClassificationModel(pl.LightningModule, ABC):
