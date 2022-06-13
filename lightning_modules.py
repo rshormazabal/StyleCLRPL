@@ -49,7 +49,7 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         self.style_vgg = self.style_vgg.eval()
         self.style_decoder = self.style_decoder.eval()
 
-        # self.adain = adain(self.style_vgg, self.style_decoder, self.alpha)
+        self.adain = adain(self.style_vgg, self.style_decoder, self.alpha)
 
     def forward(self, images: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         """
@@ -68,41 +68,35 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         :param batch: Batch from self.train_dataloader. [list]
         :return: Dictionary with per-batch loss and metrics. [dict]
         """
-        # get content images and create two views
-        # content_images, transparency, style_feats1, style_feats2 = batch[0]
-        content_images = torch.cat([batch[0], batch[0]], dim=0)
+        # if adain, apply style and then augmnetations
+        if self.cfg.augment.adain:
+            content_images, transparency, style_feats1, style_feats2 = batch[0]
+            style_feats = torch.cat([style_feats1, style_feats2], dim=0)
+            content_images = torch.cat([content_images, content_images], dim=0)
+            styled_images = self.adain(content_images, style_feats)
 
-        if self.cfg.augment.crop or self.cfg.augment.color or self.cfg.augment.blur:
-            styled_images = self.dali_augmentation(content_images)
+            if self.cfg.augment.crop or self.cfg.augment.color or self.cfg.augment.blur:
+                styled_images = torch.cat([self.dali_augmentation(im) for im in [styled_images[self.cfg.dataset.batch_size:],
+                                                                                 styled_images[:self.cfg.dataset.batch_size]]], dim=0)
+
+        # just apply augmentations to half of the images.
         else:
-            styled_images = content_images
+            styled_images = torch.cat([self.dali_augmentation(im) for im in [batch[0], batch[0]]], dim=0)
 
-        # import matplotlib.pyplot as plt
-        # from mpl_toolkits.axes_grid1 import ImageGrid
-        # import numpy as np
-        #
-        # examples = torch.cat([content_images[0].unsqueeze(0) for _ in range(36)])
-        # styled_examples = self.dali_augmentation(examples).permute(0, 2, 3, 1).detach().cpu().numpy()
-        #
-        # fig = plt.figure(figsize=(6., 6.))
-        # grid = ImageGrid(fig, 111,  # similar to subplot(111)
-        #                  nrows_ncols=(6, 6),  # creates 2x2 grid of axes
-        #                  axes_pad=0.1)  # pad between axes in inch.
-        #
-        # for ax, im in zip(grid, styled_examples):
-        #     # Iterating over the grid returns the Axes.
-        #     ax.imshow(im)
-        #
-        # plt.show()
+        import matplotlib.pyplot as plt
+        from mpl_toolkits.axes_grid1 import ImageGrid
+        import numpy as np
 
-        # content_images = torch.cat([content_images for _ in range(2)], dim=0)
-        # style_feats = torch.cat([style_feats1, style_feats2], dim=0)
-        #
-        # if self.cfg.augment.adain:
-        #     styled_images = self.adain(content_images, style_feats)
-        # else:
-        #     styled_images = content_images
-        #
+        fig = plt.figure(figsize=(6., 6.))
+        grid = ImageGrid(fig, 111,  # similar to subplot(111)
+                         nrows_ncols=(4, 4),  # creates 2x2 grid of axes
+                         axes_pad=0.1)  # pad between axes in inch.
+
+        for ax, im in zip(grid, styled_images[self.cfg.dataset.batch_size:16+self.cfg.dataset.batch_size].permute(0, 2, 3, 1).detach().cpu().numpy()):
+            # Iterating over the grid returns the Axes.
+            ax.imshow(im)
+        plt.show()
+
         # if self.cfg.augment.background_replacer:
         #     styled_images = self.background(content_images, styled_images, transparency)
 
@@ -204,8 +198,10 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         images = fn.flip(images, horizontal=1, vertical=0) if torch.rand(1) < 0.5 and self.cfg.augment.crop else images
         b, c, s = torch.distributions.uniform.Uniform(1 - 0.8, 1 + 0.8).sample([3, ])
         h = torch.distributions.uniform.Uniform(-0.2, 0.2).sample([1, ])
-        images = fn.color_twist(images, brightness=b, contrast=c, saturation=s, hue=h) if torch.rand(1) < 0.8 and self.cfg.augment.color else images  # only accept hwc
-        images = fn.color_space_conversion(images, image_type=types.RGB, output_type=types.GRAY) if torch.rand(1) < 0.2 and self.cfg.augment.color else images  # only accept hwc, uint8
+        images = fn.color_twist(images, brightness=b, contrast=c, saturation=s, hue=h) if torch.rand(
+            1) < 0.8 and self.cfg.augment.color else images  # only accept hwc
+        images = fn.color_space_conversion(images, image_type=types.RGB, output_type=types.GRAY) if torch.rand(
+            1) < 0.2 and self.cfg.augment.color else images  # only accept hwc, uint8
         images = fn.gaussian_blur(images, window_size=int(0.1 * self.cfg.augment.size)) if self.cfg.augment.blur else images
         return images
 
@@ -213,7 +209,7 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         input_dtype = images.dtype
 
         eii = ExternalInputGPUIterator(images)
-        augment = self.augment_pipeline(eii, batch_size=self.cfg.dataset.batch_size * 2, num_threads=8, device_id=self.local_rank)
+        augment = self.augment_pipeline(eii, batch_size=self.cfg.dataset.batch_size, num_threads=8, device_id=self.local_rank)
         augment.build()
         images = augment.run()
 
