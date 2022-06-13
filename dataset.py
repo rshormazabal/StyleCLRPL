@@ -2,18 +2,17 @@ import os
 import pickle
 from abc import ABC
 
-import numpy as np
 import pandas as pd
 import pytorch_lightning as pl
 import torch
 from PIL import Image
 from omegaconf import DictConfig
-from sklearn.model_selection import train_test_split
-from torch.utils.data import Dataset, Subset
+from torch.utils.data import Dataset
 from torchvision import transforms, datasets
 from torchvision.transforms import transforms, Compose
 
 from data_aug.style_transforms import test_transform
+from data_aug.transforms import TransformsSimCLR
 from exceptions.exceptions import InvalidDatasetSelection
 
 
@@ -33,15 +32,80 @@ class StyleCLRPLDataset(pl.LightningDataModule, ABC):
 
     def setup(self, **kwargs):
         self.content_dataset = ContentImageDataset(self.cfg).get_dataset_for_simclr()
-        self.stylized_dataset = StylizedDatasetOnGPU(content_dataset=self.content_dataset,
+        self.stylized_dataset = StylizedDatasetOnGPU(cfg=self.cfg,
+                                                     content_dataset=self.content_dataset,
                                                      style_data_path=self.cfg.dataset.style.data_path,
                                                      style_pickle_filename=self.cfg.dataset.style.pickle_filename)
 
     def train_dataloader(self):
-        return torch.utils.data.DataLoader(self.stylized_dataset,
-                                           # sampler=SubsetRandomSampler(torch.randperm(len(self.train_dataset))[:1000]), # in case need to test with less data
+        if self.cfg.augment.adain:
+            dataset = self.stylized_dataset
+        else:
+            dataset = self.content_dataset
+        return torch.utils.data.DataLoader(dataset,
                                            batch_size=self.cfg.dataset.batch_size,
                                            shuffle=True,
+                                           num_workers=self.cfg.dataset.num_workers,
+                                           pin_memory=True,
+                                           drop_last=True)
+
+
+class LinearProbeDataset(pl.LightningDataModule, ABC):
+    def __init__(self, cfg: DictConfig) -> None:
+        """
+        Main PL dataset module. Prepares data and dataloaders.
+        See PL documentation.
+        :param cfg: Hydra format dataset configuration. [omegaconf.dictconfig.DictConfig]
+        """
+        self.cfg = cfg
+        self.train_dataset, self.test_dataset = None, None
+        super().__init__()
+
+    def setup(self, **kwargs):
+        assert self.cfg.dataset.name in ['cifar10', 'stl10'], 'Dataset not implement. Implemented: [cifar10, stl10]'
+        # load datasets. train dataset has crop and flipping.
+        if self.cfg.dataset.name == 'cifar10':
+            self.train_dataset = datasets.CIFAR10(f'{self.cfg.root_path}/{self.cfg.dataset.path}',
+                                                  train=True,
+                                                  transform=TransformsSimCLR(size=self.cfg.augment.size).test_transform,
+                                                  download=True)
+
+            self.test_dataset = datasets.CIFAR10(f'{self.cfg.root_path}/{self.cfg.dataset.path}',
+                                                 train=False,
+                                                 transform=transforms.Compose([transforms.ToTensor()]),
+                                                 download=False)
+
+        if self.cfg.dataset.name == 'stl10':
+            self.train_dataset = datasets.STL10(f'{self.cfg.root_path}/{self.cfg.dataset.path}',
+                                                split='train',
+                                                transform=TransformsSimCLR(size=self.cfg.augment.size).test_transform,
+                                                download=True)
+
+            self.test_dataset = datasets.STL10(f'{self.cfg.root_path}/{self.cfg.dataset.path}',
+                                               split='test',
+                                               transform=transforms.Compose([transforms.ToTensor()]),
+                                               download=False)
+
+    def train_dataloader(self):
+        return torch.utils.data.DataLoader(self.train_dataset,
+                                           batch_size=self.cfg.dataset.batch_size,
+                                           shuffle=True,
+                                           num_workers=self.cfg.dataset.num_workers,
+                                           pin_memory=True,
+                                           drop_last=True)
+
+    def val_dataloader(self):
+        return torch.utils.data.DataLoader(self.test_dataset,
+                                           batch_size=self.cfg.dataset.batch_size,
+                                           shuffle=False,
+                                           num_workers=self.cfg.dataset.num_workers,
+                                           pin_memory=True,
+                                           drop_last=True)
+
+    def test_dataloader(self):
+        return torch.utils.data.DataLoader(self.test_dataset,
+                                           batch_size=self.cfg.dataset.batch_size,
+                                           shuffle=False,
                                            num_workers=self.cfg.dataset.num_workers,
                                            pin_memory=True,
                                            drop_last=True)
@@ -76,60 +140,9 @@ class ContentImageDataset:
     def get_cifar10_simclr(self):
         train_dataset = datasets.CIFAR10(self.cfg.dataset.content.path,
                                          train=True,
-                                         transform=self.get_resize_transforms())
+                                         transform=TransformsSimCLR(size=self.cfg.augment.size))
 
-        val_dataset = datasets.CIFAR10(self.cfg.dataset.content.path,
-                                       train=True,
-                                       transform=self.get_no_transforms())
-
-        test_dataset = datasets.CIFAR10(self.cfg.dataset.content.path,
-                                        train=False,
-                                        transform=self.get_no_transforms())
-
-        return train_dataset, val_dataset, test_dataset
-
-    def get_cifar10_probe(self):
-        # need to add transformations used in paper: random cropping
-        train_idx, val_idx = train_test_split(list(range(50000)), train_size=(1 - self.cfg.dataset.val_split))
-
-        # need to load two distinc datasets train and val because they have different transforms.
-        train_dataset = datasets.CIFAR10(self.cfg.dataset.content.path,
-                                         train=True,
-                                         transform=self.get_probe_transforms(32),
-                                         download=True)
-
-        val_dataset = datasets.CIFAR10(self.cfg.dataset.content.path,
-                                       train=True,
-                                       transform=self.get_no_transforms(),
-                                       download=False)
-
-        test_dataset = datasets.CIFAR10(self.cfg.dataset.content.path,
-                                        train=False,
-                                        transform=self.get_no_transforms(),
-                                        download=False)
-
-        return Subset(train_dataset, train_idx), Subset(val_dataset, val_idx), test_dataset
-
-    def get_stl10_probe(self):
-        # need to add transformations used in paper: random cropping
-        # need to add transformations used in paper: random cropping
-        train_idx, val_idx = train_test_split(list(range(5000)), train_size=(1 - self.cfg.dataset.val_split))
-
-
-        # need to load two distinc datasets train and val because they have different transforms.
-        train_dataset = datasets.STL10(self.cfg.dataset.content.path, split='train',
-                                       transform=self.get_probe_transforms(96),
-                                       download=True)
-
-        val_dataset = datasets.STL10(self.cfg.dataset.content.path, split='train',
-                                     transform=self.get_no_transforms(),
-                                     download=False)
-
-        test_dataset = datasets.STL10(self.cfg.dataset.content.path, split='test',
-                                      transform=self.get_no_transforms(),
-                                      download=False)
-
-        return Subset(train_dataset, train_idx), Subset(val_dataset, val_idx), test_dataset
+        return train_dataset
 
     def get_stl10_unlabeled(self):
         return datasets.STL10(self.cfg.dataset.content.path, split='unlabeled',
@@ -170,23 +183,6 @@ class ContentImageDataset:
 
         return train_dataset, val_dataset, test_dataset
 
-    def get_dataset_for_linear_probe(self):
-        """
-        Get datasets for the linear probe. We need a training, a validation and a test dataset.
-        Everything should be labeled.
-        """
-        val_datasets = {'cifar10': lambda: self.get_cifar10_probe(),
-                        'stl10': lambda: self.get_stl10_probe(),
-                        'stl10_bg': lambda: self.get_stl10_probe(),
-                        'imagenet': lambda: self.get_imagenet()}
-
-        try:
-            dataset_fn = val_datasets[self.cfg.dataset.content.name]
-        except KeyError:
-            raise InvalidDatasetSelection()
-        else:
-            return dataset_fn()
-
     def get_dataset_for_simclr(self):
         """
         Get datasets for the simclr. We only need the training dataset, and unlabeled is fine.
@@ -194,8 +190,8 @@ class ContentImageDataset:
         """
         if self.cfg.augment.background_replacer:
             val_datasets = {'stl10': lambda: self.get_stl10_bg()}
-        else:            
-            val_datasets = {'cifar10': lambda: self.get_cifar10_simclr()[0],
+        else:
+            val_datasets = {'cifar10': lambda: self.get_cifar10_simclr(),
                             'stl10': lambda: self.get_stl10_unlabeled(),
                             'imagenet': lambda: self.get_imagenet()[0]}
         try:
@@ -208,21 +204,23 @@ class ContentImageDataset:
 
 class StylizedDatasetOnGPU:
     def __init__(self,
+                 cfg: DictConfig,
                  content_dataset,
                  style_data_path: str,
                  style_pickle_filename: str) -> None:
         """
         Dataset for style image featurization. Uses a frozen VGG network to precalculate style feature vectors
         and avoid loading style images to GPU on each batch.
+        :param cfg: Global config dict. [dict]
         :param content_dataset: Content images torchvision dataset. [torchvision.datasets.vision.VisionDataset]
         :param style_data_path: Style metadata and images main path. [str]
         :param style_pickle_filename: Precalculated features pickle filename. [str]
         """
-
+        cfg = self.cfg
         self.content_dataset = content_dataset
 
         # TODO: abstract this values to config file
-        self.content_size = 96
+        self.content_size = self.cfg.augment.size
 
         self.content_tf = test_transform(self.content_size)
         self.toPIL = transforms.ToPILImage()

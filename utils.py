@@ -31,7 +31,7 @@ def accuracy(output, target, topk=(1,)):
 
 
 class LastEpochCheckpoint(ModelCheckpoint):
-    def __init__(self, dataset_name: str, base_model_name: str, every_k_epochs: int, *args, **kwargs):
+    def __init__(self, dataset_name: str, base_model_name: str, every_k_epochs: int, max_epochs: int, *args, **kwargs):
         """
         Checkpointer callback that saves PL module weights every K epochs.
         :param base_model_name: Current backnonem model name. [str]
@@ -39,6 +39,7 @@ class LastEpochCheckpoint(ModelCheckpoint):
         """
         super().__init__(*args, **kwargs)
         self.every_k_epochs = every_k_epochs
+        self.max_epochs = max_epochs
 
         # save in the format /checkpoints/day/time/bas_model/
         self.dirpath = Path(self.dirpath) / dataset_name / base_model_name
@@ -47,17 +48,18 @@ class LastEpochCheckpoint(ModelCheckpoint):
     @rank_zero_only
     def on_train_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule, *args, **kwargs):
         # save pl module parameters (includes model parameters, scheduler config, etc)
-        if pl_module.current_epoch % self.every_k_epochs == 0:
+        if (pl_module.current_epoch % self.every_k_epochs == 0) or (pl_module.current_epoch == self.max_epochs):
             assert self.dirpath is not None
 
             # get current path
             current = self.dirpath / f"latest-epoch={pl_module.current_epoch}.ckpt"
 
-            # get preivous checkpoint filename to delete
-            prev = (self.dirpath / f"latest-epoch={pl_module.current_epoch - self.every_k_epochs}.ckpt")
+            # get previous checkpoint filename to delete
+            # prev = (self.dirpath / f"latest-epoch={pl_module.current_epoch - self.every_k_epochs}.ckpt")
             trainer.save_checkpoint(current)
 
-            prev.unlink(missing_ok=True)
+            # Beter to not delete previous to test after training.
+            # prev.unlink(missing_ok=True)
 
         # save YAML config on the first epoch
         # TODO: fails if we start from a configuration file with epoch different to zero.

@@ -1,0 +1,38 @@
+model_name: LinearProbe_base                                             # Model name for loggin (neptune).
+root_path: /home/rodrigo/projects/StyleCLRPL                                                          # Project main root.
+seed: 10                                                                 # Random seed in random, torch, pandas and /home/rodrigo/projects/StyleCLRPL/.
+gpu_ids:
+  -7
+
+results_path: results_probe_no_adain.csv
+train:                                                                     # PL trainer params. See PL trainer documentation.
+  strategy: null
+  precision: 32
+  max_epochs: 100
+  log_every_n_steps: 4
+  check_val_every_n_epoch: 0
+  amp_backend: native
+  enable_checkpointing: True
+
+model:
+  base_model: resnet50                                                     # Backbone model for SimCLR.
+  smaller_base: True                                                       # Decrease the size of the first convolution layer (cifar10)
+
+dataset:
+  name: cifar10                                                            # Dataset to use (stl10/cifar10)
+  path: datasets                                                   # Content images path.
+  num_classes: 10
+  batch_size: 512                                                          # Main batch size.
+  num_workers: 4                                                           # Main dataloader number of workers.
+
+augment:
+  size: 32                                                                 # random crop and resize to this size
+
+optimizer:
+  name: Adam                                                           # (Adam/LARS)
+  lr: 0.0003                                                               # Main Learning rate. (0.3 * batch_size/256)
+  weight_decay: 0.000001                                                   # Weight decay.
+
+checkpoint:
+  run_name: model_checkpoints/cifar10/resnet50/2022-06-12/17-33-05
+  epoch: 10

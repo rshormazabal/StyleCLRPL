@@ -38,7 +38,8 @@ def main(cfg: DictConfig) -> None:
     checkpoint_callback = LastEpochCheckpoint(dirpath=cfg.callbacks.checkpoints.dirpath,
                                               dataset_name=cfg.dataset.content.name,
                                               base_model_name=cfg.model.base_model,
-                                              every_k_epochs=cfg.callbacks.checkpoints.every_k_epochs)
+                                              every_k_epochs=cfg.callbacks.checkpoints.every_k_epochs,
+                                              max_epochs=cfg.train.max_epochs)
     # profiler
     profiler = None
 

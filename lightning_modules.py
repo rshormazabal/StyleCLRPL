@@ -3,18 +3,14 @@ from typing import Tuple
 
 import pytorch_lightning as pl
 import torch
+from flash.core.optimizers import LARS
+from omegaconf import DictConfig
+from pl_bolts.optimizers.lr_scheduler import LinearWarmupCosineAnnealingLR
 from pytorch_lightning.utilities.types import STEP_OUTPUT, EPOCH_OUTPUT
 from torch.nn import functional as F, Sequential
-from torch.utils.data import DataLoader
 
-from flash.core.optimizers import LARS
-
-from pl_bolts.optimizers.lr_scheduler import LinearWarmupCosineAnnealingLR
-from dataset import ContentImageDataset
-from omegaconf import DictConfig
 from data_aug.adain import vgg, decoder
-from data_aug.transforms import adain, background, dali
-
+from data_aug.transforms import adain, background
 from models.resnet_simclr import ResNetSimCLR, ResNetDownStream
 from utils import accuracy
 
@@ -51,27 +47,6 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
 
         self.adain = adain(self.style_vgg, self.style_decoder, self.alpha)
         self.background = background()
-        self.dali = dali(self.cfg, self.cfg.augment.crop, self.cfg.augment.color, self.cfg.augment.blur)
-
-        ##
-        # linear predictor
-        ##
-
-        train_data, val_data, _ = ContentImageDataset(self.cfg).get_dataset_for_linear_probe()
-
-        self.probe_train_dataloader = DataLoader(train_data,
-                                                 batch_size=self.cfg.probe.batch_size,
-                                                 shuffle=True,
-                                                 num_workers=self.cfg.dataset.num_workers,
-                                                 pin_memory=True,
-                                                 drop_last=True)
-
-        self.probe_val_dataloader = DataLoader(val_data,
-                                               batch_size=128,
-                                               shuffle=False,
-                                               num_workers=self.cfg.dataset.num_workers,
-                                               pin_memory=True,
-                                               drop_last=True)
 
     def forward(self, images: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         """
@@ -91,25 +66,20 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         :return: Dictionary with per-batch loss and metrics. [dict]
         """
         # get content images and create two views
-        content_images, transparency, style_feats1, style_feats2 = batch[0]
+        # content_images, transparency, style_feats1, style_feats2 = batch[0]
+        aug_1, aug_2 = batch[0]
+        styled_images = torch.cat([aug_1, aug_2], dim=0)
 
-        content_images = torch.cat([content_images for _ in range(2)], dim=0)
-        style_feats = torch.cat([style_feats1, style_feats2], dim=0)
-
-        ######################
-        # Augment the images #
-        ######################
-
-        if self.cfg.augment.adain:
-            styled_images = self.adain(content_images, style_feats)
-        else:
-            styled_images = content_images
-            
-        if self.cfg.augment.background_replacer:
-            styled_images = self.background(content_images, styled_images, transparency)
-
-        if self.cfg.augment.crop or self.cfg.augment.color or self.cfg.augment.blur:
-            styled_images = self.dali(styled_images)
+        # content_images = torch.cat([content_images for _ in range(2)], dim=0)
+        # style_feats = torch.cat([style_feats1, style_feats2], dim=0)
+        #
+        # if self.cfg.augment.adain:
+        #     styled_images = self.adain(content_images, style_feats)
+        # else:
+        #     styled_images = content_images
+        #
+        # if self.cfg.augment.background_replacer:
+        #     styled_images = self.background(content_images, styled_images, transparency)
 
         # augmented views contrastive setup
         features = self.model(styled_images)
@@ -147,34 +117,6 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         self.log("nce/top1", top1_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
         self.log("nce/top5", top5_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
 
-        is_last_epoch = self.current_epoch == self.cfg.train.max_epochs - 1
-
-        if self.current_epoch % self.cfg.probe.run_every_n_epoch == 0 or is_last_epoch:
-            if self.global_rank == 0:
-                result = self.run_linear_predictor(is_last_epoch)
-                self.log_dict(result, on_epoch=True, prog_bar=True, sync_dist=True)
-
-    
-    def run_linear_predictor(self, is_last_epoch):
-
-        if is_last_epoch:
-            epochs = self.cfg.probe.last_run_epochs
-        else:
-            epochs = self.cfg.probe.epochs
-
-        trainer = pl.Trainer(gpus=self.cfg.probe.gpu_id,
-                             strategy=None,
-                             precision=self.cfg.train.precision,
-                             log_every_n_steps=1,
-                             amp_backend='native',
-                             max_epochs=epochs)
-
-        downstream_model = ClassificationModel(self.cfg)
-        downstream_model.model.get_params_from_resnetsimclr(self.model)
-        downstream_model.model.freeze_conv_params()
-
-        trainer.fit(downstream_model, self.probe_train_dataloader)
-        return trainer.validate(downstream_model, self.probe_val_dataloader)[0]
 
     def info_nce_loss(self, features: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -222,14 +164,14 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         optim_name = optim_dict[self.cfg.optimizer.name]
 
         optimizer = optim_name(self.model.parameters(),
-                            self.cfg.optimizer.lr,
-                            weight_decay=self.cfg.optimizer.weight_decay)
+                               self.cfg.optimizer.lr,
+                               weight_decay=self.cfg.optimizer.weight_decay)
 
         scheduler = LinearWarmupCosineAnnealingLR(optimizer,
                                                   warmup_epochs=self.cfg.scheduler.warmup_epochs,
                                                   max_epochs=self.cfg.train.max_epochs)
 
-        return [optimizer] , [{"scheduler": scheduler}]
+        return [optimizer], [{"scheduler": scheduler}]
 
 
 class ClassificationModel(pl.LightningModule, ABC):
@@ -263,7 +205,7 @@ class ClassificationModel(pl.LightningModule, ABC):
         :param batch: Batch from self.train_dataloader. [list]
         :return: Dictionary with per-batch loss and metrics. [dict]
         """
-      
+
         content_images, labels = batch
 
         features = self.model(content_images)
@@ -322,13 +264,13 @@ class ClassificationModel(pl.LightningModule, ABC):
         :return:
         """
         opt_dict = {"Adam": torch.optim.Adam(self.model.parameters(),
-                                     self.cfg.optimizer.lr,
-                                     weight_decay=self.cfg.optimizer.weight_decay),
+                                             self.cfg.optimizer.lr,
+                                             weight_decay=self.cfg.optimizer.weight_decay),
                     "Nesterov": torch.optim.SGD(self.model.parameters(),
                                                 momentum=0.9,
-                                                nesterov = True,
-                                                lr = self.cfg.dataset.batch_size/256 * 0.05)}
+                                                nesterov=True,
+                                                lr=self.cfg.dataset.batch_size / 256 * 0.05)}
 
-        optimizer = opt_dict[self.cfg.probe.optimizer_name]
+        optimizer = opt_dict[self.cfg.optimizer.name]
 
         return [optimizer]
