@@ -216,7 +216,7 @@ class StylizedDatasetOnGPU:
         :param style_data_path: Style metadata and images main path. [str]
         :param style_pickle_filename: Precalculated features pickle filename. [str]
         """
-        cfg = self.cfg
+        self.cfg = cfg
         self.content_dataset = content_dataset
 
         # TODO: abstract this values to config file

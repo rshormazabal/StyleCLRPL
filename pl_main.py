@@ -16,7 +16,7 @@ from lightning_modules import StyleCLRPLModel
 from utils import LastEpochCheckpoint
 
 
-@hydra.main(config_path="conf", config_name="StyleCLR_test")
+@hydra.main(config_path="conf", config_name="StyleCLR_test", version_base="1.2")
 def main(cfg: DictConfig) -> None:
     """
     Main training class. All parameters are defined in the yaml Hydra configuration.
