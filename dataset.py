@@ -145,8 +145,9 @@ class ContentImageDataset:
         return train_dataset
 
     def get_stl10_unlabeled(self):
-        return datasets.STL10(self.cfg.dataset.content.path, split='unlabeled',
-                              transform=self.get_no_transforms(),
+        return datasets.STL10(self.cfg.dataset.content.path,
+                              split='unlabeled',
+                              transform=TransformsSimCLR(size=self.cfg.augment.size),
                               download=True)
 
     def get_stl10_bg(self):

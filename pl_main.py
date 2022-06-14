@@ -28,10 +28,6 @@ def main(cfg: DictConfig) -> None:
 
     # base setup
     data = StyleCLRPLDataset(cfg)
-    data.setup()
-
-    # set dataloader len for scheduler
-    cfg.dataset['len_train_loader'] = len(data.train_dataloader())
 
     # checkpoint callback, saves last model every k epochs. Better than implementing directly in the PL logic since
     # it can have problems on DDP if main process not set corectly.
@@ -40,8 +36,6 @@ def main(cfg: DictConfig) -> None:
                                               base_model_name=cfg.model.base_model,
                                               every_k_epochs=cfg.callbacks.checkpoints.every_k_epochs,
                                               max_epochs=cfg.train.max_epochs)
-    # profiler
-    profiler = None
 
     # pl model
     model = StyleCLRPLModel(cfg)
@@ -89,8 +83,7 @@ def main(cfg: DictConfig) -> None:
                          enable_checkpointing=cfg.train.enable_checkpointing,
                          callbacks=[ModelSummary(max_depth=1),
                                     LearningRateMonitor(),
-                                    checkpoint_callback],
-                         profiler=profiler)
+                                    checkpoint_callback])
     trainer.fit(model, data)
 
 

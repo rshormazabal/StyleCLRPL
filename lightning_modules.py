@@ -70,6 +70,18 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         aug_1, aug_2 = batch[0]
         styled_images = torch.cat([aug_1, aug_2], dim=0)
 
+        # import matplotlib.pyplot as plt
+        # from mpl_toolkits.axes_grid1 import ImageGrid
+        # fig = plt.figure(figsize=(6., 6.))
+        # grid = ImageGrid(fig, 111,  # similar to subplot(111)
+        #                  nrows_ncols=(4, 4),  # creates 2x2 grid of axes
+        #                  axes_pad=0.1)  # pad between axes in inch.
+        #
+        # for ax, im in zip(grid, aug_2[:16].permute(0, 2, 3, 1).detach().cpu().numpy()):
+        #     ax.imshow(im)
+        #     ax.set_axis_off()
+        # plt.show()
+
         # content_images = torch.cat([content_images for _ in range(2)], dim=0)
         # style_feats = torch.cat([style_feats1, style_feats2], dim=0)
         #
@@ -116,7 +128,6 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         # get mean across all batches
         self.log("nce/top1", top1_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
         self.log("nce/top5", top5_epoch_avg, on_epoch=True, prog_bar=True, sync_dist=True)
-
 
     def info_nce_loss(self, features: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
