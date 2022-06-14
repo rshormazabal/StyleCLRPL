@@ -4,6 +4,7 @@ outputs/
 nohup.out
 data/style_precalculated_features.pkl
 model_checkpoints/
+lightning_logs/
 
 # Visual Studio Code
 .vscode
