@@ -36,7 +36,7 @@ dataset:
     image_size: 96                                                         # Style image warp size (square).
     device: 6                                                              # Device to calculate preprocessed style embeddings.
   content:
-    name: cifar10                                                            # Dataset to use (stl10/cifar10)
+    name: cifar10                                                            # Dataset to use (stl10/cifar10/silhouettes)
     path: /ROOT/datasets/stl10                                             # Content images path.
     bg_path: /ROOT/datasets/stl10/stl10_bg.pkl                             # Path to the stl10 background masking pickle
   batch_size: 512                                                           # Main batch size.

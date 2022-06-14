@@ -15,6 +15,9 @@ from data_aug.style_transforms import test_transform
 from data_aug.transforms import TransformsSimCLR
 from exceptions.exceptions import InvalidDatasetSelection
 
+import scipy.io as sio
+import numpy as np
+
 
 class StyleCLRPLDataset(pl.LightningDataModule, ABC):
     def __init__(self, cfg: DictConfig) -> None:
@@ -85,6 +88,13 @@ class LinearProbeDataset(pl.LightningDataModule, ABC):
                                                split='test',
                                                transform=transforms.Compose([transforms.ToTensor()]),
                                                download=False)
+        if self.cfg.dataset.name == 'silhouettes':
+            self.train_dataset = Silhouettes(f'{self.cfg.root_path}/{self.cfg.dataset.path}',
+                                                train=True,
+                                                transform=TransformsSimCLR(size=self.cfg.augment.size).test_transform)
+            self.test_dataset = Silhouettes(f'{self.cfg.root_path}/{self.cfg.dataset.path}',
+                                                train=False,
+                                                transform=transforms.Compose([transforms.ToTensor()]))
 
     def train_dataloader(self):
         return torch.utils.data.DataLoader(self.train_dataset,
@@ -201,6 +211,35 @@ class ContentImageDataset:
         else:
             return dataset_fn()
 
+
+class Silhouettes(Dataset):
+    def __init__(self, path, train=True, transform=None):
+        if not os.path.exists(path):
+            raise InvalidDatasetSelection('you have to download silhouettes dataset fisrt, /StyleCLRPL/datasets/silhouettes/caltech101_silhouettes_28_split1.mat --> does not exist' )
+        
+        mat = sio.loadmat(path)
+        if train:
+            traindata = np.reshape(np.array(mat['train_data']), (4100,28,28))
+            train_label = np.array(mat['train_labels'])-1 #(4100,1), label 1~101 -> 0~100
+            valdata = np.reshape(np.array(mat['val_data']), (2264,28,28))
+            val_label = np.array(mat['val_labels'])-1 #(2264,1), label 1~101 -> 0~100
+
+            self.data = 255*np.append(traindata, valdata, axis=0)
+            self.label = np.squeeze(np.append(train_label, val_label, axis=0))
+            
+        else:
+            self.data = 255*np.reshape(np.array(mat['test_data']), (2307,28,28))
+            self.label = np.squeeze(np.array(mat['test_labels'])-1) #(2307,1), label 1~101 -> 0~100
+        
+        self.transform = transform
+    
+    def __getitem__(self, i):
+        data=self.data[i,:,:]
+        data = Image.fromarray(data)
+        data = self.transform(data)
+        label = self.label[i]
+        return data, torch.Tensor(label, dtype=torch.long)
+        
 
 class StylizedDatasetOnGPU:
     def __init__(self,
