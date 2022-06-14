@@ -12,11 +12,12 @@ from torch.nn import functional as F, Sequential
 from nvidia.dali.plugin.pytorch import feed_ndarray
 import nvidia.dali.fn as fn
 import nvidia.dali.types as types
-from nvidia.dali import pipeline_def
+from nvidia.dali import Pipeline
 from data_aug.adain import vgg, decoder
 from data_aug.transforms import adain, background, dali_augmentation, ExternalInputGPUIterator
 from models.resnet_simclr import ResNetSimCLR, ResNetDownStream
 from utils import accuracy
+from nvidia.dali.pipeline.experimental import pipeline_def
 
 
 class StyleCLRPLModel(pl.LightningModule, ABC):
@@ -49,7 +50,7 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         self.style_vgg = self.style_vgg.eval()
         self.style_decoder = self.style_decoder.eval()
 
-        self.adain = adain(self.style_vgg, self.style_decoder, self.alpha)
+        self.adain = adain(self.style_vgg, self.style_decoder, self.cfg.model.style_alpha)
 
     def forward(self, images: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         """
@@ -69,39 +70,50 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
         :return: Dictionary with per-batch loss and metrics. [dict]
         """
         # if adain, apply style and then augmnetations
+        # self.adain = adain(self.style_vgg, self.style_decoder, 0.4)
         if self.cfg.augment.adain:
             content_images, transparency, style_feats1, style_feats2 = batch[0]
-            style_feats = torch.cat([style_feats1, style_feats2], dim=0)
-            content_images = torch.cat([content_images, content_images], dim=0)
-            styled_images = self.adain(content_images, style_feats)
+            # style_feats = torch.cat([style_feats1, style_feats2], dim=0)
+            # content_images = torch.cat([content_images, content_images], dim=0)
+            styled_image1 = self.adain(content_images, style_feats1)
+            styled_image2 = self.adain(content_images, style_feats2)
+            styled_images = torch.cat([styled_image1, styled_image2], dim=0)
+
+            augmented_styled_images = self.dali_augmentations(styled_images)
 
             if self.cfg.augment.crop or self.cfg.augment.color or self.cfg.augment.blur:
-                styled_images = torch.cat([self.dali_augmentation(im) for im in [styled_images[self.cfg.dataset.batch_size:],
-                                                                                 styled_images[:self.cfg.dataset.batch_size]]], dim=0)
-
-        # just apply augmentations to half of the images.
+                augmented_styled_images = self.dali_augmentations(styled_images)
         else:
-            styled_images = torch.cat([self.dali_augmentation(im) for im in [batch[0], batch[0]]], dim=0)
+            augmented_styled_images = torch.cat([self.dali_augmentations(im) for im in [batch[0], batch[0]]], dim=0)
 
-        import matplotlib.pyplot as plt
-        from mpl_toolkits.axes_grid1 import ImageGrid
-        import numpy as np
-
-        fig = plt.figure(figsize=(6., 6.))
-        grid = ImageGrid(fig, 111,  # similar to subplot(111)
-                         nrows_ncols=(4, 4),  # creates 2x2 grid of axes
-                         axes_pad=0.1)  # pad between axes in inch.
-
-        for ax, im in zip(grid, styled_images[self.cfg.dataset.batch_size:16+self.cfg.dataset.batch_size].permute(0, 2, 3, 1).detach().cpu().numpy()):
-            # Iterating over the grid returns the Axes.
-            ax.imshow(im)
-        plt.show()
-
+        # import matplotlib.pyplot as plt
+        # from mpl_toolkits.axes_grid1 import ImageGrid
+        # fig = plt.figure(figsize=(6., 6.))
+        # grid = ImageGrid(fig, 111,  # similar to subplot(111)
+        #                  nrows_ncols=(4, 4),  # creates 2x2 grid of axes
+        #                  axes_pad=0.1)  # pad between axes in inch.
+        #
+        # for ax, im in zip(grid, augmented_styled_images[:16].permute(0, 2, 3, 1).detach().cpu().numpy()):
+        #     ax.imshow(im)
+        #     ax.set_axis_off()
+        # plt.show()
+        #
+        #
+        # for ax, im in zip(grid, styled_images[self.cfg.dataset.batch_size:16+self.cfg.dataset.batch_size].permute(0, 2, 3, 1).detach().cpu().numpy()):
+        #     ax.set_axis_off()
+        #     ax.imshow(im)
+        # plt.show()
+        #
+        # for ax, im in zip(grid, styled_images[:16].permute(0, 2, 3, 1).detach().cpu().numpy()):
+        #     ax.set_axis_off()
+        #     ax.imshow(im)
+        # plt.show()
+        #
         # if self.cfg.augment.background_replacer:
         #     styled_images = self.background(content_images, styled_images, transparency)
 
         # augmented views contrastive setup
-        features = self.model(styled_images)
+        features = self.model(augmented_styled_images)
         logits, labels = self.info_nce_loss(features)
         loss = torch.nn.CrossEntropyLoss()(logits, labels)
 
@@ -191,37 +203,105 @@ class StyleCLRPLModel(pl.LightningModule, ABC):
 
         return [optimizer], [{"scheduler": scheduler}]
 
-    @pipeline_def
-    def augment_pipeline(self, cuda_images):
-        images = fn.external_source(source=cuda_images, device='gpu', batch=True, cuda_stream=0, dtype=types.UINT8)
-        images = fn.random_resized_crop(images, size=self.cfg.augment.size) if self.cfg.augment.crop else images
-        images = fn.flip(images, horizontal=1, vertical=0) if torch.rand(1) < 0.5 and self.cfg.augment.crop else images
-        b, c, s = torch.distributions.uniform.Uniform(1 - 0.8, 1 + 0.8).sample([3, ])
-        h = torch.distributions.uniform.Uniform(-0.2, 0.2).sample([1, ])
-        images = fn.color_twist(images, brightness=b, contrast=c, saturation=s, hue=h) if torch.rand(
-            1) < 0.8 and self.cfg.augment.color else images  # only accept hwc
-        images = fn.color_space_conversion(images, image_type=types.RGB, output_type=types.GRAY) if torch.rand(
-            1) < 0.2 and self.cfg.augment.color else images  # only accept hwc, uint8
-        images = fn.gaussian_blur(images, window_size=int(0.1 * self.cfg.augment.size)) if self.cfg.augment.blur else images
+    @pipeline_def()
+    def augmentations_pipeline(self, cuda_images):
+        # get current pipeline information
+        pipe = Pipeline.current()
+        images = fn.external_source(source=cuda_images, device='gpu', batch=True, cuda_stream=0, dtype=types.FLOAT)
+
+        # crop, resize and flip
+        if self.cfg.augment.crop:
+            images = fn.random_resized_crop(images, size=self.cfg.augment.size) if self.cfg.augment.crop else images
+            images = fn.flip(images, horizontal=1, vertical=0) if torch.rand(1) < 0.5 and self.cfg.augment.crop else images
+
+        # sample color jitter transformations. brightness, constrast, saturation and hue, with an certain probability.
+        if self.cfg.augment.color:
+            # TODO: move the range parameters to the config file. [0.8, 0.8, 0.8, 0.2]
+            bcs_range, h_range, augment_prob = 0.8, 0.2, 0.8
+            color_jitter_parameters = torch.ones((4, pipe.max_batch_size), device=pipe.device_id)
+            bcsh_mask = torch.cuda.FloatTensor(pipe.max_batch_size).uniform_() < augment_prob  # sample cases to augment
+            color_jitter_parameters[:3, bcsh_mask] = torch.distributions.uniform.Uniform(1 - bcs_range, 1 + bcs_range).sample([3, bcsh_mask.sum()]).to(pipe.device_id)
+
+            # set non-sampled images to hue to zero.
+            color_jitter_parameters[3, bcsh_mask] = torch.distributions.uniform.Uniform(-h_range, h_range).sample((bcsh_mask.sum(),)).to(pipe.device_id)
+            color_jitter_parameters[3, ~bcsh_mask] = 0
+
+            print(images, images.shape)
+            # need to sample random mask to emulate the probability of not doing anything.
+            images = fn.color_twist(images,
+                                    brightness=color_jitter_parameters,
+                                    contrast=0.8,
+                                    saturation=0.8,
+                                    hue=0.2,
+                                    # brightness=color_jitter_parameters[0].unsqueeze(1),
+                                    # contrast=color_jitter_parameters[1].unsqueeze(1),
+                                    # saturation=color_jitter_parameters[2].unsqueeze(1),
+                                    # hue=color_jitter_parameters[3].unsqueeze(1))
+                                    )
+
+            # to emulate randomGrayScale we need to use HSV and coin flip
+            grayscale_prob = 0.2
+            saturate = fn.random.coin_flip(probability=1 - grayscale_prob)
+            saturate = fn.cast(saturate, dtype=types.FLOAT)
+            images = fn.hsv(images, saturation=saturate)
+
+        # blur
+        if self.cfg.augment.blur:
+            blur_prob = 0.5
+            sigma_range = [0.1, 2]
+            blur_parameters = torch.zeros((pipe.max_batch_size, 1), device=pipe.device_id)
+            sigma_mask = torch.cuda.FloatTensor(pipe.max_batch_size).uniform_() < blur_prob
+
+            # sample sigmas
+            blur_parameters[sigma_mask, 0] = torch.distributions.uniform.Uniform(sigma_range[0], sigma_range[1]).sample((sigma_mask.sum(),)).to(pipe.device_id)
+
+            print(blur_parameters, blur_parameters.shape)
+            images = fn.gaussian_blur(images, sigma=0.5, window_size=int(0.1 * self.cfg.augment.size))
         return images
 
-    def dali_augmentation(self, images):
-        input_dtype = images.dtype
-
+    def dali_augmentations(self, images):
+        batch_size, c, h, w = images.shape
+        # iterator to feed to pipeline
         eii = ExternalInputGPUIterator(images)
-        augment = self.augment_pipeline(eii, batch_size=self.cfg.dataset.batch_size, num_threads=8, device_id=self.local_rank)
+
+        # build augmentation pipeline
+        augment = self.augmentations_pipeline(eii, batch_size=batch_size, num_threads=8, device_id=self.trainer.root_gpu)
         augment.build()
-        images = augment.run()
 
-        images = images[0].as_tensor()  # type : TensorGPU
+        # run augmentation and reshape output to original shape
+        output_images = augment.run()[0]
+        output_images = output_images.as_tensor()
 
-        augmented_images = torch.zeros(images.shape(), dtype=torch.uint8).cuda()
-        feed_ndarray(images, augmented_images)
-        augmented_images = augmented_images.permute(0, 3, 1, 2).type(input_dtype) / 255.
-        c = augmented_images.shape[1]
-        if c == 1:
+        # populate vector with augmented images
+        augmented_images = torch.zeros((batch_size, h, w, c), dtype=torch.float, device=images.device)
+        feed_ndarray(output_images, augmented_images)
+
+        # to [0, 1] range
+        augmented_images = augmented_images.permute(0, 3, 1, 2) / 255.
+
+        # repeat channel for BW images
+        if augmented_images.shape[1] == 1:
             augmented_images = augmented_images.repeat(1, 3, 1, 1)
+        #
+        # ############## DEBUGGING##############
+        # import matplotlib.gridspec as gridspec
+        # import matplotlib.pyplot as plt
+        #
+        # def show_images(image_batch):
+        #     columns = 4
+        #     rows = (4)
+        #     fig = plt.figure(figsize=(24, (24 // columns) * rows))
+        #     gs = gridspec.GridSpec(rows, columns)
+        #     for j in range(rows * columns):
+        #         plt.subplot(gs[j])
+        #         plt.axis("off")
+        #         plt.imshow(image_batch[j])
+        #     plt.show()
+        #
+        # show_images(augmented_images[:16].detach().cpu().permute(0, 2, 3, 1).numpy())
 
+        # plt.imshow((augmented_images[1].permute(1, 2, 0)).cpu().detach())
+        # plt.show()
         return augmented_images
 
 

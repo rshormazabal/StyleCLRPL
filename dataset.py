@@ -220,7 +220,6 @@ class StylizedDatasetOnGPU:
         self.cfg = cfg
         self.content_dataset = content_dataset
 
-        # TODO: abstract this values to config file
         self.content_size = self.cfg.augment.size
 
         self.content_tf = test_transform(self.content_size)
@@ -239,7 +238,6 @@ class StylizedDatasetOnGPU:
 
     def __getitem__(self, idx):
         # sample to style images
-        # TODO: does it matter that 2 random images have the same style in one batch? Maybe need to implement a more efficient sampling method per epoch.
         sampled_styles = torch.randint(low=0, high=self.style_embeddings.shape[0], size=(2,))
 
         # get content image

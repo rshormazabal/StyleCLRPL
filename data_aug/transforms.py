@@ -42,7 +42,8 @@ class ExternalInputGPUIterator(object):
         return self
 
     def __next__(self):
-        return [self.images[i, :, :, :].type(torch.uint8) for i in range(self.n)]
+        return self.images
+        # return [self.images[i, :, :, :] for i in range(self.n)]
 
 
 def dali_augmentation(images):
@@ -63,6 +64,7 @@ def dali_augmentation(images):
         augmented_images = augmented_images.repeat(1, 3, 1, 1)
 
     return augmented_images
+
 
 class TransformsSimCLR:
     """
